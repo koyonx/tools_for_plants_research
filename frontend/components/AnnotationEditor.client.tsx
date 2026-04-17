@@ -155,7 +155,12 @@ export function AnnotationEditorInner({
     if (!stage) return;
     const pos = pointerInStageCoords(stage);
     if (!pos) return;
-    setCurrentPolygon((prev) => [...prev, [pos.x, pos.y]]);
+    // Clicks outside the image (blank stage area, especially visible after
+    // panning/zooming) must not land as polygon vertices — clamping to the
+    // image rectangle keeps pixel coords legal for the training rasterizer.
+    const x = Math.min(Math.max(pos.x, 0), imageWidth);
+    const y = Math.min(Math.max(pos.y, 0), imageHeight);
+    setCurrentPolygon((prev) => [...prev, [x, y]]);
   };
 
   const cancelCurrent = useCallback(() => setCurrentPolygon([]), []);

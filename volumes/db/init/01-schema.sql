@@ -265,12 +265,22 @@ CREATE POLICY "annotations insert"
     AND EXISTS (SELECT 1 FROM public.images WHERE id = annotations.image_id)
   );
 
+-- Updates must keep the row both owned by the caller AND attached to an
+-- image the caller can still read — otherwise an annotator could re-point
+-- their row at an image they have no access to and poison its training
+-- data (PostgREST accepts direct column updates by default).
 DROP POLICY IF EXISTS "annotations owner update" ON public.annotations;
 CREATE POLICY "annotations owner update"
   ON public.annotations FOR UPDATE
   TO authenticated
-  USING (owner_id = auth.uid())
-  WITH CHECK (owner_id = auth.uid());
+  USING (
+    owner_id = auth.uid()
+    AND EXISTS (SELECT 1 FROM public.images WHERE id = annotations.image_id)
+  )
+  WITH CHECK (
+    owner_id = auth.uid()
+    AND EXISTS (SELECT 1 FROM public.images WHERE id = annotations.image_id)
+  );
 
 DROP POLICY IF EXISTS "annotations owner delete" ON public.annotations;
 CREATE POLICY "annotations owner delete"
