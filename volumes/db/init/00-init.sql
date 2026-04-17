@@ -63,3 +63,58 @@ GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
+-- ---------------------------------------------------------------------------
+-- Auth helper functions (auth.uid / auth.role / auth.email / auth.jwt)
+--
+-- The hosted / `supabase/postgres` image ships these out of the box; we are
+-- on plain `postgres:15-alpine`, so they need to exist *before* 01-schema.sql
+-- creates any RLS policy that references them (CREATE POLICY parses and
+-- type-checks the expression immediately — missing functions abort initdb).
+--
+-- Definitions mirror what PostgREST injects per request via
+-- `request.jwt.claims`; values are STABLE so the planner can cache them
+-- within a single query.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION auth.jwt()
+RETURNS jsonb
+LANGUAGE sql STABLE
+AS $$
+  SELECT COALESCE(
+    nullif(current_setting('request.jwt.claim', true), ''),
+    nullif(current_setting('request.jwt.claims', true), '')
+  )::jsonb
+$$;
+
+CREATE OR REPLACE FUNCTION auth.uid()
+RETURNS uuid
+LANGUAGE sql STABLE
+AS $$
+  SELECT COALESCE(
+    nullif(current_setting('request.jwt.claim.sub', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+  )::uuid
+$$;
+
+CREATE OR REPLACE FUNCTION auth.role()
+RETURNS text
+LANGUAGE sql STABLE
+AS $$
+  SELECT COALESCE(
+    nullif(current_setting('request.jwt.claim.role', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
+  )::text
+$$;
+
+CREATE OR REPLACE FUNCTION auth.email()
+RETURNS text
+LANGUAGE sql STABLE
+AS $$
+  SELECT COALESCE(
+    nullif(current_setting('request.jwt.claim.email', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'email')
+  )::text
+$$;
+
+GRANT EXECUTE ON FUNCTION auth.jwt(), auth.uid(), auth.role(), auth.email()
+  TO anon, authenticated, service_role;
