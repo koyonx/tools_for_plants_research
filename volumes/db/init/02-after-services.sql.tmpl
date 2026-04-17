@@ -74,3 +74,103 @@ CREATE POLICY "images object delete"
     bucket_id = 'images'
     AND owner = auth.uid()
   );
+
+-- ===========================================================================
+-- annotations (PR #4) — manual polygon labels for tissue classes.  Used as
+-- training data for the deep-learning segmentation that arrives in PR #5.
+--
+-- Lives here (not in 01-schema.sql) so it lands on existing deployments too:
+-- `/docker-entrypoint-initdb.d/01-schema.sql` only executes on first initdb
+-- of a data volume, whereas this file is applied by supabase-bootstrap on
+-- every `docker compose up`, and every statement below is idempotent.
+--
+-- NB: clients talk to PostgREST directly with the anon/JWT key, so DB-level
+-- validation is the only thing stopping a malicious caller from writing an
+-- unknown class or a malformed polygon that would crash the renderer (and
+-- poison training data).  Keep in sync with frontend/lib/tissue-classes.ts
+-- and backend/app/pipeline/classes.py.
+-- ===========================================================================
+CREATE OR REPLACE FUNCTION public.is_valid_polygon(p jsonb) RETURNS boolean
+  LANGUAGE sql IMMUTABLE
+AS $$
+  SELECT p IS NOT NULL
+     AND jsonb_typeof(p) = 'array'
+     AND jsonb_array_length(p) >= 3
+     AND NOT EXISTS (
+       SELECT 1
+       FROM jsonb_array_elements(p) AS elem
+       WHERE jsonb_typeof(elem) <> 'array'
+          OR jsonb_array_length(elem) <> 2
+          OR jsonb_typeof(elem -> 0) <> 'number'
+          OR jsonb_typeof(elem -> 1) <> 'number'
+     )
+$$;
+
+CREATE TABLE IF NOT EXISTS public.annotations (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  image_id    uuid NOT NULL REFERENCES public.images(id)    ON DELETE CASCADE,
+  owner_id    uuid NOT NULL REFERENCES public.profiles(id)  ON DELETE CASCADE,
+  class       text NOT NULL,
+  polygon     jsonb NOT NULL,
+  note        text,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- Add CHECK constraints defensively (ALTER TABLE … ADD CONSTRAINT doesn't
+-- support IF NOT EXISTS before PG 18, so we drop+add to stay idempotent).
+ALTER TABLE public.annotations DROP CONSTRAINT IF EXISTS annotations_class_check;
+ALTER TABLE public.annotations ADD CONSTRAINT annotations_class_check CHECK (
+  class IN (
+    'upper_epidermis', 'lower_epidermis', 'palisade', 'spongy',
+    'bundle_sheath', 'xylem', 'phloem', 'stomata', 'intercellular', 'other'
+  )
+);
+ALTER TABLE public.annotations DROP CONSTRAINT IF EXISTS annotations_polygon_check;
+ALTER TABLE public.annotations ADD CONSTRAINT annotations_polygon_check CHECK (
+  public.is_valid_polygon(polygon)
+);
+
+CREATE INDEX IF NOT EXISTS annotations_image_idx ON public.annotations(image_id);
+CREATE INDEX IF NOT EXISTS annotations_owner_idx ON public.annotations(owner_id);
+
+ALTER TABLE public.annotations ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "annotations read"        ON public.annotations;
+CREATE POLICY "annotations read"
+  ON public.annotations FOR SELECT
+  TO anon, authenticated
+  USING (EXISTS (SELECT 1 FROM public.images WHERE id = annotations.image_id));
+
+DROP POLICY IF EXISTS "annotations insert"      ON public.annotations;
+CREATE POLICY "annotations insert"
+  ON public.annotations FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    owner_id = auth.uid()
+    AND EXISTS (SELECT 1 FROM public.images WHERE id = annotations.image_id)
+  );
+
+DROP POLICY IF EXISTS "annotations owner update" ON public.annotations;
+CREATE POLICY "annotations owner update"
+  ON public.annotations FOR UPDATE
+  TO authenticated
+  USING (
+    owner_id = auth.uid()
+    AND EXISTS (SELECT 1 FROM public.images WHERE id = annotations.image_id)
+  )
+  WITH CHECK (
+    owner_id = auth.uid()
+    AND EXISTS (SELECT 1 FROM public.images WHERE id = annotations.image_id)
+  );
+
+DROP POLICY IF EXISTS "annotations owner delete" ON public.annotations;
+CREATE POLICY "annotations owner delete"
+  ON public.annotations FOR DELETE
+  TO authenticated
+  USING (owner_id = auth.uid());
+
+DROP TRIGGER IF EXISTS annotations_set_updated_at ON public.annotations;
+CREATE TRIGGER annotations_set_updated_at
+  BEFORE UPDATE ON public.annotations
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();

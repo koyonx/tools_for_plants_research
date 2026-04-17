@@ -118,3 +118,23 @@ $$;
 
 GRANT EXECUTE ON FUNCTION auth.jwt(), auth.uid(), auth.role(), auth.email()
   TO anon, authenticated, service_role;
+
+-- GoTrue runs its own migration `00_init_auth_schema.up.sql` as
+-- `supabase_auth_admin` on first boot and re-declares auth.uid / auth.role
+-- via `CREATE OR REPLACE FUNCTION`, which requires ownership.  Transfer
+-- ownership now so that migration succeeds and auth/storage can come up.
+ALTER FUNCTION auth.jwt()   OWNER TO supabase_auth_admin;
+ALTER FUNCTION auth.uid()   OWNER TO supabase_auth_admin;
+ALTER FUNCTION auth.role()  OWNER TO supabase_auth_admin;
+ALTER FUNCTION auth.email() OWNER TO supabase_auth_admin;
+
+-- storage-api and GoTrue both run schema migrations as their own admin
+-- roles; they need CREATE privileges on the current database to set up
+-- functions/sequences outside their authorized schema.
+DO $$
+BEGIN
+  EXECUTE format('GRANT ALL PRIVILEGES ON DATABASE %I TO supabase_auth_admin',
+                 current_database());
+  EXECUTE format('GRANT ALL PRIVILEGES ON DATABASE %I TO supabase_storage_admin',
+                 current_database());
+END$$;
