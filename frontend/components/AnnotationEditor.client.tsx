@@ -280,7 +280,13 @@ export function AnnotationEditorInner({
         ))}
       </div>
 
-      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: interactive annotation surface (role=application per WAI-ARIA); tabIndex is required so Space/Enter/Backspace reach the scoped onKeyDown handler instead of window. */}
+      {/*
+        tabIndex on this div is intentional: role="application" marks it as
+        an interactive editor surface (WAI-ARIA), and focusing it lets our
+        scoped onKeyDown handler capture Space / Enter / Backspace without
+        hijacking the rest of the page.  Biome's noNoninteractiveTabindex
+        rule is disabled project-wide for exactly this case (see biome.json).
+      */}
       <div
         ref={containerRef}
         tabIndex={0}
