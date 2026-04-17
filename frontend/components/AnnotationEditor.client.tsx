@@ -47,6 +47,17 @@ function flattenPoints(polygon: number[][]): number[] {
   return out;
 }
 
+// Defensive in case the DB yields rows that pre-date the polygon CHECK
+// constraint — the editor must never render a crash-inducing shape.
+function isWellFormedPolygon(polygon: unknown): polygon is number[][] {
+  if (!Array.isArray(polygon) || polygon.length < 3) return false;
+  for (const pt of polygon) {
+    if (!Array.isArray(pt) || pt.length !== 2) return false;
+    if (typeof pt[0] !== "number" || typeof pt[1] !== "number") return false;
+  }
+  return true;
+}
+
 export function AnnotationEditorInner({
   imageId,
   imageUrl,
@@ -68,6 +79,9 @@ export function AnnotationEditorInner({
   const [currentPolygon, setCurrentPolygon] = useState<number[][]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Hold Space to pan while a polygon is in progress; mirrors the
+  // convention in most annotation tools (e.g. Label Studio / CVAT).
+  const [panMode, setPanMode] = useState(false);
 
   // Responsive stage width
   useEffect(() => {
@@ -131,6 +145,8 @@ export function AnnotationEditorInner({
 
   const handleStageClick = (e: KonvaEventObject<MouseEvent>) => {
     if (!canEdit) return;
+    // While panning we never want a spurious click to add a vertex.
+    if (panMode) return;
     // Ignore clicks on existing annotations (we use Line onClick for delete)
     if (e.target !== e.target.getStage() && e.target.className !== "Image") {
       return;
@@ -188,12 +204,19 @@ export function AnnotationEditorInner({
     setAnnotations((prev) => prev.filter((a) => a.id !== id));
   };
 
-  // Keyboard: Enter closes polygon, Esc cancels, Backspace undoes last vertex
+  // Keyboard: Enter closes polygon, Esc cancels, Backspace undoes last vertex,
+  // Space (held) enables pan mode so the user can scroll the stage around
+  // without losing the polygon in progress.
   useEffect(() => {
     if (!canEdit) return;
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        setPanMode(true);
+        return;
+      }
       if (e.key === "Enter") {
         e.preventDefault();
         void savePolygon();
@@ -203,8 +226,15 @@ export function AnnotationEditorInner({
         undoLast();
       }
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") setPanMode(false);
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+    };
   }, [canEdit, savePolygon, cancelCurrent, undoLast]);
 
   const currentClassColor = TISSUE_CLASS_BY_KEY[currentClass]?.color ?? "#888";
@@ -245,16 +275,21 @@ export function AnnotationEditorInner({
             width={stageWidth}
             height={STAGE_HEIGHT}
             ref={stageRef}
-            draggable={canEdit ? currentPolygon.length === 0 : true}
+            draggable={canEdit ? currentPolygon.length === 0 || panMode : true}
             onWheel={handleWheel}
             onClick={handleStageClick}
             onTap={handleStageClick}
+            style={{ cursor: panMode ? "grab" : canEdit ? "crosshair" : "default" }}
           >
             <Layer>
               <KonvaImage image={image} width={imageWidth} height={imageHeight} listening />
             </Layer>
             <Layer>
               {annotations.map((a) => {
+                // Skip legacy / malformed rows defensively; the DB now
+                // enforces the shape via CHECK but we still harden the
+                // renderer against bad data.
+                if (!isWellFormedPolygon(a.polygon)) return null;
                 const cls = TISSUE_CLASS_BY_KEY[a.class];
                 const color = cls?.color ?? "#888";
                 const isOwn = a.owner_id === currentUserId;
@@ -346,7 +381,8 @@ export function AnnotationEditorInner({
               取消 (Esc)
             </button>
             <span className="text-xs text-neutral-500">
-              クリックで頂点追加、ドラッグでパン、ホイールでズーム、既存ポリゴンをクリックで削除
+              クリックで頂点追加、<kbd className="rounded border px-1">Space</kbd>
+              押しながらドラッグでパン、ホイールでズーム、既存ポリゴンをクリックで削除
             </span>
           </>
         ) : (

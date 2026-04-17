@@ -203,13 +203,38 @@ CREATE TRIGGER analyses_set_updated_at
 -- ===========================================================================
 -- annotations — manual polygon labels for tissue classes.  Used as
 -- training data for the deep-learning segmentation that arrives in PR #5.
+--
+-- NB: clients talk to PostgREST directly with the anon/JWT key, so DB-level
+-- validation is the only thing stopping a malicious caller from writing an
+-- unknown class or a malformed polygon that later crashes the renderer
+-- (and poisons training data).  Keep these checks in sync with
+-- frontend/lib/tissue-classes.ts + backend/app/pipeline/classes.py.
 -- ===========================================================================
+CREATE OR REPLACE FUNCTION public.is_valid_polygon(p jsonb) RETURNS boolean
+  LANGUAGE sql IMMUTABLE
+AS $$
+  SELECT p IS NOT NULL
+     AND jsonb_typeof(p) = 'array'
+     AND jsonb_array_length(p) >= 3
+     AND NOT EXISTS (
+       SELECT 1
+       FROM jsonb_array_elements(p) AS elem
+       WHERE jsonb_typeof(elem) <> 'array'
+          OR jsonb_array_length(elem) <> 2
+          OR jsonb_typeof(elem -> 0) <> 'number'
+          OR jsonb_typeof(elem -> 1) <> 'number'
+     )
+$$;
+
 CREATE TABLE IF NOT EXISTS public.annotations (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   image_id    uuid NOT NULL REFERENCES public.images(id)    ON DELETE CASCADE,
   owner_id    uuid NOT NULL REFERENCES public.profiles(id)  ON DELETE CASCADE,
-  class       text NOT NULL,          -- tissue class key, e.g. 'palisade'
-  polygon     jsonb NOT NULL,         -- [[x, y], [x, y], ...] in image px
+  class       text NOT NULL CHECK (class IN (
+    'upper_epidermis', 'lower_epidermis', 'palisade', 'spongy',
+    'bundle_sheath', 'xylem', 'phloem', 'stomata', 'intercellular', 'other'
+  )),
+  polygon     jsonb NOT NULL CHECK (public.is_valid_polygon(polygon)),
   note        text,
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now()
