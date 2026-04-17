@@ -26,6 +26,35 @@ export type ProfileRow = {
   updated_at: string;
 };
 
+export type MeasurementResult = {
+  leaf_area_um2: number;
+  leaf_mean_thickness_um: number;
+  leaf_median_thickness_um: number;
+  leaf_min_thickness_um: number;
+  leaf_max_thickness_um: number;
+  thickness_profile_um: number[];
+  thickness_profile_x_um: number[];
+  valid_columns: number;
+};
+
+export type BasicMeasurementResult = {
+  scale: { um_per_px: number; bar_px_length: number; bbox_xywh: number[] };
+  measurement: MeasurementResult;
+  image_shape: { height_px: number; width_px: number };
+};
+
+export type AnalysisRow = {
+  id: string;
+  image_id: string;
+  kind: string;
+  status: "pending" | "running" | "done" | "error";
+  parameters: Record<string, unknown> | null;
+  result: BasicMeasurementResult | Record<string, unknown> | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {

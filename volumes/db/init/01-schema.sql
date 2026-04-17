@@ -124,3 +124,78 @@ DROP TRIGGER IF EXISTS profiles_set_updated_at ON public.profiles;
 CREATE TRIGGER profiles_set_updated_at
   BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ===========================================================================
+-- analyses — pipeline results (scale/leaf-region/measurement, and later
+-- tissue-segmentation, water-transport, …).  One row per run per kind.
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS public.analyses (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  image_id      uuid NOT NULL REFERENCES public.images(id) ON DELETE CASCADE,
+  kind          text NOT NULL,                 -- e.g. 'basic_measurement'
+  status        text NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'running', 'done', 'error')),
+  parameters    jsonb,
+  result        jsonb,
+  error         text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS analyses_image_idx ON public.analyses(image_id);
+CREATE INDEX IF NOT EXISTS analyses_kind_idx  ON public.analyses(kind);
+
+ALTER TABLE public.analyses ENABLE ROW LEVEL SECURITY;
+
+-- Delegate visibility/writability to the linked image's own RLS.  EXISTS
+-- against public.images re-enters the image policies with the caller's JWT,
+-- so the access rules stay in one place.
+DROP POLICY IF EXISTS "analyses read"         ON public.analyses;
+CREATE POLICY "analyses read"
+  ON public.analyses FOR SELECT
+  TO anon, authenticated
+  USING (EXISTS (SELECT 1 FROM public.images WHERE id = analyses.image_id));
+
+DROP POLICY IF EXISTS "analyses owner insert" ON public.analyses;
+CREATE POLICY "analyses owner insert"
+  ON public.analyses FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.images
+      WHERE id = analyses.image_id AND owner_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "analyses owner update" ON public.analyses;
+CREATE POLICY "analyses owner update"
+  ON public.analyses FOR UPDATE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.images
+      WHERE id = analyses.image_id AND owner_id = auth.uid()
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.images
+      WHERE id = analyses.image_id AND owner_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "analyses owner delete" ON public.analyses;
+CREATE POLICY "analyses owner delete"
+  ON public.analyses FOR DELETE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.images
+      WHERE id = analyses.image_id AND owner_id = auth.uid()
+    )
+  );
+
+DROP TRIGGER IF EXISTS analyses_set_updated_at ON public.analyses;
+CREATE TRIGGER analyses_set_updated_at
+  BEFORE UPDATE ON public.analyses
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
