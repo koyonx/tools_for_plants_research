@@ -53,6 +53,32 @@ class SupabaseAuthedClient:
         rows: list[dict[str, Any]] = response.json()
         return rows[0] if rows else None
 
+    async def list_images(self) -> list[dict[str, Any]]:
+        """Every image the caller can read (RLS-filtered)."""
+        response = await self._request(
+            "GET",
+            "/rest/v1/images",
+            params={"select": "*", "order": "created_at.desc"},
+        )
+        rows: list[dict[str, Any]] = response.json()
+        return rows
+
+    async def list_annotations(self, image_id: str) -> list[dict[str, Any]]:
+        # Order by creation time (id breaks timestamp ties) so the
+        # rasteriser's last-write-wins semantics on overlapping polygons
+        # stays deterministic and matches the editor's visual layering.
+        response = await self._request(
+            "GET",
+            "/rest/v1/annotations",
+            params={
+                "image_id": f"eq.{image_id}",
+                "select": "*",
+                "order": "created_at.asc,id.asc",
+            },
+        )
+        rows: list[dict[str, Any]] = response.json()
+        return rows
+
     async def insert_analysis(self, row: dict[str, Any]) -> dict[str, Any]:
         response = await self._request(
             "POST",
