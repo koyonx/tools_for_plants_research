@@ -10,13 +10,14 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:800
 type Props = {
   imageId: string;
   initial?: AnalysisRow | null;
+  canRun: boolean;
 };
 
 function isBasicResult(r: AnalysisRow["result"]): r is BasicMeasurementResult {
   return Boolean(r && typeof r === "object" && "measurement" in r && "scale" in r);
 }
 
-export function AnalyzePanel({ imageId, initial }: Props) {
+export function AnalyzePanel({ imageId, initial, canRun }: Props) {
   const supabase = createClient();
   const [referenceUm, setReferenceUm] = useState("100");
   const [analysis, setAnalysis] = useState<AnalysisRow | null>(initial ?? null);
@@ -81,25 +82,29 @@ export function AnalyzePanel({ imageId, initial }: Props) {
     <section className="space-y-4 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
       <div className="flex flex-wrap items-end gap-3">
         <h2 className="text-lg font-semibold">基本計測</h2>
-        <label className="flex items-center gap-2 text-sm">
-          スケールバー長 (µm)
-          <input
-            type="number"
-            min="0"
-            step="any"
-            value={referenceUm}
-            onChange={(e) => setReferenceUm(e.target.value)}
-            className="w-24 rounded border border-neutral-300 bg-transparent px-2 py-1 dark:border-neutral-700"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={runAnalysis}
-          disabled={running}
-          className="rounded bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
-        >
-          {running ? "解析中…" : "解析する"}
-        </button>
+        {canRun && (
+          <>
+            <label className="flex items-center gap-2 text-sm">
+              スケールバー長 (µm)
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={referenceUm}
+                onChange={(e) => setReferenceUm(e.target.value)}
+                className="w-24 rounded border border-neutral-300 bg-transparent px-2 py-1 dark:border-neutral-700"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={runAnalysis}
+              disabled={running}
+              className="rounded bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+            >
+              {running ? "解析中…" : "解析する"}
+            </button>
+          </>
+        )}
         {analysis && (
           <button
             type="button"
@@ -110,6 +115,12 @@ export function AnalyzePanel({ imageId, initial }: Props) {
           </button>
         )}
       </div>
+
+      {!canRun && (
+        <p className="rounded bg-neutral-50 p-3 text-xs text-neutral-600 dark:bg-neutral-900 dark:text-neutral-400">
+          他のユーザーがオーナーの画像のため、解析の実行はオーナー本人のみ可能です。過去の結果は閲覧できます。
+        </p>
+      )}
 
       {error && (
         <p className="rounded bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">

@@ -42,6 +42,11 @@ export default async function ImageDetailPage({
     .limit(1)
     .maybeSingle<AnalysisRow>();
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const isOwner = Boolean(user && user.id === image.owner_id);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -82,7 +87,7 @@ export default async function ImageDetailPage({
         </p>
       )}
 
-      <AnalyzePanel imageId={image.id} initial={latestAnalysis ?? null} />
+      <AnalyzePanel imageId={image.id} initial={latestAnalysis ?? null} canRun={isOwner} />
     </div>
   );
 }
