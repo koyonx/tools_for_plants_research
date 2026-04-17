@@ -1,0 +1,76 @@
+-- ---------------------------------------------------------------------------
+-- Runs *conceptually* after GoTrue and storage-api have created their own
+-- tables (auth.users, storage.buckets, storage.objects).  Postgres's initdb
+-- runs synchronously during first boot though — before those services have
+-- had a chance to migrate — so we cannot simply sort this as `02-*.sql`.
+--
+-- The `supabase-bootstrap` one-shot service in docker-compose.supabase.yml
+-- waits for the auth/storage migrations to land and then applies this file
+-- via psql.  Re-run is idempotent (DROP IF EXISTS / ON CONFLICT DO NOTHING).
+-- ---------------------------------------------------------------------------
+
+-- ===========================================================================
+-- Auto-create profile row whenever a new auth.users row appears.
+-- ===========================================================================
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, display_name)
+  VALUES (NEW.id, COALESCE(NEW.raw_user_meta_data->>'display_name', NEW.email))
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ===========================================================================
+-- Storage bucket `images` + per-object RLS mirroring public.images visibility
+-- ===========================================================================
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('images', 'images', false)
+ON CONFLICT (id) DO NOTHING;
+
+-- Read: allow when the corresponding public.images row is readable by caller.
+DROP POLICY IF EXISTS "images object read" ON storage.objects;
+CREATE POLICY "images object read"
+  ON storage.objects FOR SELECT
+  TO anon, authenticated
+  USING (
+    bucket_id = 'images'
+    AND EXISTS (
+      SELECT 1 FROM public.images
+      WHERE storage_path = storage.objects.name
+        AND (
+          visibility = 'public'
+          OR (visibility = 'lab'     AND auth.role() = 'authenticated')
+          OR (visibility = 'private' AND owner_id  = auth.uid())
+        )
+    )
+  );
+
+-- Write: any authenticated user can upload into their own namespace
+-- (<user_id>/...), and owner of the object can delete.
+DROP POLICY IF EXISTS "images object insert" ON storage.objects;
+CREATE POLICY "images object insert"
+  ON storage.objects FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    bucket_id = 'images'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+DROP POLICY IF EXISTS "images object delete" ON storage.objects;
+CREATE POLICY "images object delete"
+  ON storage.objects FOR DELETE
+  TO authenticated
+  USING (
+    bucket_id = 'images'
+    AND owner = auth.uid()
+  );

@@ -88,16 +88,35 @@ tools_for_plants_research/
 
 | PR | 内容 | 状態 |
 |----|------|------|
-| #1 | インフラ土台（本PR） | 🔨 進行中 |
-| #2 | 認証 + 画像アップロード + ビューワー | ⏳ |
+| #1 | インフラ土台 | ✅ マージ済 |
+| #2 | 認証 + 画像アップロード + ビューワー（本PR） | 🔨 進行中 |
 | #3 | スケール検出 + 葉領域抽出 + 基本計測 | ⏳ |
 | #4 | アノテーションワークフロー | ⏳ |
 | #5 | 組織多クラス分割 + 気孔/維管束検出 | ⏳ |
 | #6 | 最短経路 + 透水マップ | ⏳ |
 | #7 | 精度検証 + リリース整備 | ⏳ |
 
+## データモデル / 権限
+
+- `public.profiles` — `auth.users` と 1:1（初回サインインで自動作成）
+- `public.images` — 画像メタデータ。`visibility` は `private / lab / public` の 3 値
+- Row Level Security で以下を強制:
+  - `private`: 所有者のみ読み書き
+  - `lab`: ログイン済ユーザー全員が read 可、書き込みは所有者のみ
+  - `public`: 未ログインでも read 可
+- Storage バケット `images` にも同じ可視性ロジックを `storage.objects` の RLS で適用
+
+## 認証フロー
+
+1. `/login` でメールアドレスを入力 → マジックリンク送信
+2. 開発環境では SMTP 未設定のため、`supabase-auth` コンテナのログにリンクが出力される
+   ```bash
+   docker compose logs supabase-auth | grep -i "confirm your signup\|magic link"
+   ```
+3. リンクをクリック → `/auth/callback` でコード交換 → `/dashboard`
+
 ## 将来計画
 
 - 研究室内の機材からクラウド（Supabase Storage）への直接アップロード
-- 画像の可視性（private / lab / public）管理を RLS で実装
-- 外部公開時の OAuth ログイン対応
+  （`images.source` に `device:<serial>` を格納できるスキーマは本PRで用意済）
+- 外部公開時の OAuth プロバイダ追加
