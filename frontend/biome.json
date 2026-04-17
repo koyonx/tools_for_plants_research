@@ -13,9 +13,6 @@
       "recommended": true,
       "style": {
         "noNonNullAssertion": "off"
-      },
-      "performance": {
-        "noImgElement": "off"
       }
     }
   },
