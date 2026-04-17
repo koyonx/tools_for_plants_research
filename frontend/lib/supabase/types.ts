@@ -55,6 +55,17 @@ export type AnalysisRow = {
   updated_at: string;
 };
 
+export type AnnotationRow = {
+  id: string;
+  image_id: string;
+  owner_id: string;
+  class: string;
+  polygon: number[][]; // [[x, y], ...] in image-pixel coordinates
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {

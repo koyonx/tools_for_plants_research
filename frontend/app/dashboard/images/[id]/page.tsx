@@ -49,7 +49,7 @@ export default async function ImageDetailPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <Link href="/dashboard" className="text-sm text-neutral-500 underline">
             ← 一覧へ戻る
@@ -74,6 +74,12 @@ export default async function ImageDetailPage({
             <dd>{new Date(image.created_at).toLocaleString("ja-JP")}</dd>
           </dl>
         </div>
+        <Link
+          href={`/dashboard/images/${image.id}/annotate`}
+          className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
+        >
+          アノテーション
+        </Link>
       </div>
 
       {signed?.signedUrl ? (

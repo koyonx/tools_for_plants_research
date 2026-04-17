@@ -199,3 +199,10 @@ DROP TRIGGER IF EXISTS analyses_set_updated_at ON public.analyses;
 CREATE TRIGGER analyses_set_updated_at
   BEFORE UPDATE ON public.analyses
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- NOTE: public.annotations (PR #4) is defined in volumes/db/init/02-after-services.sql.tmpl
+-- — Postgres's initdb runs /docker-entrypoint-initdb.d/*.sql only on the
+-- first-ever boot of a data volume, so anything added to this file later
+-- would silently skip existing deployments.  Schema extensions after the
+-- initial release therefore live in files applied by the supabase-bootstrap
+-- service, which psql-applies them idempotently on every `docker compose up`.
