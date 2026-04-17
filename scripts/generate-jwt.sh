@@ -19,14 +19,18 @@ NOW=$(date +%s)
 EXP=$((NOW + 60 * 60 * 24 * 365 * 5))   # 5 years
 
 b64url() {
-  openssl base64 -e -A | tr -- '+/' '-_' | tr -d '='
+  # Order sets so neither argument starts with `-` — keeps BSD tr (macOS) happy.
+  openssl base64 -e -A | tr '/+' '_-' | tr -d '='
 }
 
 make_token() {
   local role="$1"
   local header payload signature
   header=$(printf '{"alg":"HS256","typ":"JWT"}' | b64url)
-  payload=$(jq -nc \
+  # `jq -j` suppresses the trailing newline so it isn't b64-encoded into the
+  # payload (which would both break strict JWT parsers and invalidate the HMAC
+  # signature computed below).
+  payload=$(jq -cjn \
       --arg role "$role" \
       --argjson iat "$NOW" \
       --argjson exp "$EXP" \

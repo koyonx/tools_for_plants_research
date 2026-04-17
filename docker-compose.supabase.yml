@@ -162,6 +162,11 @@ services:
       - supabase-net
 
   # ---------- Kong (API gateway) -----------------------------------------
+  # kong.yml contains `${SUPABASE_ANON_KEY}` / `${SUPABASE_SERVICE_KEY}`
+  # placeholders that Kong itself does not expand.  The entrypoint below runs
+  # a shell eval over the mounted template so the values land in the real
+  # config before Kong reads it.  Technique mirrors Supabase's official
+  # self-hosted compose.
   supabase-kong:
     image: kong:2.8.1
     container_name: supabase-kong
@@ -173,9 +178,13 @@ services:
         condition: service_started
       supabase-storage:
         condition: service_started
+    entrypoint:
+      - bash
+      - -c
+      - 'eval "echo \"$$(cat /home/kong/temp.yml)\"" > /home/kong/kong.yml && /docker-entrypoint.sh kong docker-start'
     environment:
       KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
       KONG_DNS_ORDER: LAST,A,CNAME
       KONG_PLUGINS: request-transformer,cors,key-auth,acl
       KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
@@ -183,7 +192,7 @@ services:
       SUPABASE_ANON_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
     volumes:
-      - ./volumes/api/kong.yml:/var/lib/kong/kong.yml:ro
+      - ./volumes/api/kong.yml:/home/kong/temp.yml:ro
     ports:
       - "8000:8000"
       - "8443:8443"

@@ -16,9 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ---- deps layer ---------------------------------------------------------
+# Install third-party deps before copying sources so dependency changes are
+# cached.  Hatchling needs `app/` to exist for the editable install, so we
+# materialise a stub here; the real code is copied in the runtime stage and
+# overrides this stub.
 FROM base AS deps
 COPY pyproject.toml ./
-RUN pip install --upgrade pip && \
+RUN mkdir -p app && touch app/__init__.py && \
+    pip install --upgrade pip && \
     pip install -e ".[dev]"
 
 # ---- runtime ------------------------------------------------------------
