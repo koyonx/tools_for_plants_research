@@ -199,3 +199,61 @@ DROP TRIGGER IF EXISTS analyses_set_updated_at ON public.analyses;
 CREATE TRIGGER analyses_set_updated_at
   BEFORE UPDATE ON public.analyses
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ===========================================================================
+-- annotations — manual polygon labels for tissue classes.  Used as
+-- training data for the deep-learning segmentation that arrives in PR #5.
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS public.annotations (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  image_id    uuid NOT NULL REFERENCES public.images(id)    ON DELETE CASCADE,
+  owner_id    uuid NOT NULL REFERENCES public.profiles(id)  ON DELETE CASCADE,
+  class       text NOT NULL,          -- tissue class key, e.g. 'palisade'
+  polygon     jsonb NOT NULL,         -- [[x, y], [x, y], ...] in image px
+  note        text,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS annotations_image_idx ON public.annotations(image_id);
+CREATE INDEX IF NOT EXISTS annotations_owner_idx ON public.annotations(owner_id);
+
+ALTER TABLE public.annotations ENABLE ROW LEVEL SECURITY;
+
+-- Anyone who can read the image can read its annotations.  That keeps
+-- lab-shared and public images collaboratively annotatable without extra
+-- policy plumbing.
+DROP POLICY IF EXISTS "annotations read"        ON public.annotations;
+CREATE POLICY "annotations read"
+  ON public.annotations FOR SELECT
+  TO anon, authenticated
+  USING (EXISTS (SELECT 1 FROM public.images WHERE id = annotations.image_id));
+
+-- Any authenticated user can label an image they can read.  Each annotator
+-- stores their own rows — good for tracking who labelled what.
+DROP POLICY IF EXISTS "annotations insert"      ON public.annotations;
+CREATE POLICY "annotations insert"
+  ON public.annotations FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    owner_id = auth.uid()
+    AND EXISTS (SELECT 1 FROM public.images WHERE id = annotations.image_id)
+  );
+
+DROP POLICY IF EXISTS "annotations owner update" ON public.annotations;
+CREATE POLICY "annotations owner update"
+  ON public.annotations FOR UPDATE
+  TO authenticated
+  USING (owner_id = auth.uid())
+  WITH CHECK (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "annotations owner delete" ON public.annotations;
+CREATE POLICY "annotations owner delete"
+  ON public.annotations FOR DELETE
+  TO authenticated
+  USING (owner_id = auth.uid());
+
+DROP TRIGGER IF EXISTS annotations_set_updated_at ON public.annotations;
+CREATE TRIGGER annotations_set_updated_at
+  BEFORE UPDATE ON public.annotations
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
