@@ -32,6 +32,7 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/tests:/app/tests
+      - plants-ml-cache:/root/.cellpose
     ports:
       - "8001:8001"
     networks:
@@ -62,3 +63,6 @@ services:
       - "3000:3000"
     networks:
       - supabase-net
+
+volumes:
+  plants-ml-cache:

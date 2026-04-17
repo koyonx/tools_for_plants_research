@@ -1,8 +1,9 @@
 import { AnalyzePanel } from "@/components/AnalyzePanel";
+import { CellposePanel } from "@/components/CellposePanel";
 import { ImageViewer } from "@/components/ImageViewer";
 import { toPublicSupabaseUrl } from "@/lib/supabase/public-url";
 import { createClient } from "@/lib/supabase/server";
-import type { AnalysisRow, ImageRow } from "@/lib/supabase/types";
+import type { AnalysisRow, BasicMeasurementResult, ImageRow } from "@/lib/supabase/types";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -42,10 +43,29 @@ export default async function ImageDetailPage({
     .limit(1)
     .maybeSingle<AnalysisRow>();
 
+  const { data: latestCellpose } = await supabase
+    .from("analyses")
+    .select("*")
+    .eq("image_id", image.id)
+    .eq("kind", "cellpose_cells")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<AnalysisRow>();
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
   const isOwner = Boolean(user && user.id === image.owner_id);
+
+  // Prefer the most recent basic-measurement scale if present so Cellpose
+  // cell areas can be rendered in µm² rather than raw pixels².
+  const scaleResult =
+    latestAnalysis?.result &&
+    typeof latestAnalysis.result === "object" &&
+    "scale" in latestAnalysis.result
+      ? ((latestAnalysis.result as BasicMeasurementResult).scale?.um_per_px ?? null)
+      : null;
+  const umPerPx = image.scale_um_per_px ?? scaleResult;
 
   return (
     <div className="space-y-4">
@@ -94,6 +114,15 @@ export default async function ImageDetailPage({
       )}
 
       <AnalyzePanel imageId={image.id} initial={latestAnalysis ?? null} canRun={isOwner} />
+      {signed?.signedUrl && (
+        <CellposePanel
+          imageId={image.id}
+          imageUrl={toPublicSupabaseUrl(signed.signedUrl)}
+          initial={latestCellpose ?? null}
+          umPerPx={umPerPx}
+          canRun={isOwner}
+        />
+      )}
     </div>
   );
 }
