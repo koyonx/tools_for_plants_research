@@ -4,8 +4,7 @@
 // the host for the browser-reachable public URL before handing the link to
 // React so <img src> actually works.
 
-const internalSupabaseUrl =
-  process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+const internalSupabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const publicSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 
 export function toPublicSupabaseUrl(url: string): string {
