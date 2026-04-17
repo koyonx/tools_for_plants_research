@@ -161,6 +161,42 @@ services:
     networks:
       - supabase-net
 
+  # ---------- Bootstrap (one-shot) ---------------------------------------
+  # Waits for GoTrue / storage-api to finish their own migrations, then
+  # applies 02-after-services.sql.tmpl (triggers on auth.users, images
+  # bucket, storage RLS).  Re-running is safe.
+  supabase-bootstrap:
+    image: postgres:15-alpine
+    container_name: supabase-bootstrap
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      supabase-auth:
+        condition: service_started
+      supabase-storage:
+        condition: service_started
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./volumes/db/init/02-after-services.sql.tmpl:/bootstrap.sql:ro
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        echo "waiting for auth.users..."
+        until psql -h supabase-db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -tAc "SELECT 1 FROM auth.users LIMIT 0" >/dev/null 2>&1; do sleep 2; done
+        echo "waiting for storage.buckets..."
+        until psql -h supabase-db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -tAc "SELECT 1 FROM storage.buckets LIMIT 0" >/dev/null 2>&1; do sleep 2; done
+        echo "applying bootstrap SQL..."
+        psql -h supabase-db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /bootstrap.sql
+        echo "bootstrap done"
+    restart: "no"
+    networks:
+      - supabase-net
+
   # ---------- Kong (API gateway) -----------------------------------------
   # kong.yml contains `${SUPABASE_ANON_KEY}` / `${SUPABASE_SERVICE_KEY}`
   # placeholders that Kong itself does not expand.  The entrypoint below runs
