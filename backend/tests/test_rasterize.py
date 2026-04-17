@@ -38,7 +38,7 @@ def test_overlapping_polygons_last_write_wins() -> None:
     # Two overlapping squares — second (spongy) should overwrite palisade.
     ann = [
         {"class": "palisade", "polygon": [[0, 0], [30, 0], [30, 30], [0, 30]]},
-        {"class": "spongy",   "polygon": [[15, 15], [45, 15], [45, 45], [15, 45]]},
+        {"class": "spongy", "polygon": [[15, 15], [45, 15], [45, 45], [15, 45]]},
     ]
     mask = rasterize_annotations(ann, 60, 60)
     # inside palisade-only region

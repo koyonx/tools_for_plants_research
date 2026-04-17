@@ -64,10 +64,17 @@ class SupabaseAuthedClient:
         return rows
 
     async def list_annotations(self, image_id: str) -> list[dict[str, Any]]:
+        # Order by creation time (id breaks timestamp ties) so the
+        # rasteriser's last-write-wins semantics on overlapping polygons
+        # stays deterministic and matches the editor's visual layering.
         response = await self._request(
             "GET",
             "/rest/v1/annotations",
-            params={"image_id": f"eq.{image_id}", "select": "*"},
+            params={
+                "image_id": f"eq.{image_id}",
+                "select": "*",
+                "order": "created_at.asc,id.asc",
+            },
         )
         rows: list[dict[str, Any]] = response.json()
         return rows
