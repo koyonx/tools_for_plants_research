@@ -1,0 +1,62 @@
+# ==============================================================================
+# Main compose — orchestrates our app services and pulls in Supabase via
+# `include:`.  Requires Docker Compose v2.20+.
+#   docker compose up -d
+# ==============================================================================
+
+name: plants-research
+
+include:
+  - docker-compose.supabase.yml
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: plants-backend
+    restart: unless-stopped
+    depends_on:
+      supabase-kong:
+        condition: service_started
+    environment:
+      BACKEND_HOST: ${BACKEND_HOST}
+      BACKEND_PORT: ${BACKEND_PORT}
+      BACKEND_LOG_LEVEL: ${BACKEND_LOG_LEVEL}
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS}
+      SUPABASE_INTERNAL_URL: ${SUPABASE_INTERNAL_URL}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/tests:/app/tests
+    ports:
+      - "8001:8001"
+    networks:
+      - supabase-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    container_name: plants-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL}
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ./frontend/app:/app/app
+      - ./frontend/components:/app/components
+      - ./frontend/lib:/app/lib
+      - ./frontend/public:/app/public
+    ports:
+      - "3000:3000"
+    networks:
+      - supabase-net
