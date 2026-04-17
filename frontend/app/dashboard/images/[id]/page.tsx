@@ -1,7 +1,8 @@
+import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { ImageViewer } from "@/components/ImageViewer";
 import { toPublicSupabaseUrl } from "@/lib/supabase/public-url";
 import { createClient } from "@/lib/supabase/server";
-import type { ImageRow } from "@/lib/supabase/types";
+import type { AnalysisRow, ImageRow } from "@/lib/supabase/types";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -31,6 +32,20 @@ export default async function ImageDetailPage({
   const { data: signed } = await supabase.storage
     .from("images")
     .createSignedUrl(image.storage_path, 60 * 60);
+
+  const { data: latestAnalysis } = await supabase
+    .from("analyses")
+    .select("*")
+    .eq("image_id", image.id)
+    .eq("kind", "basic_measurement")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<AnalysisRow>();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const isOwner = Boolean(user && user.id === image.owner_id);
 
   return (
     <div className="space-y-4">
@@ -71,6 +86,8 @@ export default async function ImageDetailPage({
           画像の署名付き URL を取得できませんでした。権限を確認してください。
         </p>
       )}
+
+      <AnalyzePanel imageId={image.id} initial={latestAnalysis ?? null} canRun={isOwner} />
     </div>
   );
 }
