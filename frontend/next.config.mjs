@@ -3,11 +3,15 @@ const nextConfig = {
   reactStrictMode: true,
   output: "standalone",
   webpack: (config) => {
-    // konva tries to `require('canvas')` on the server for node-side
-    // rendering; we only use it in client components, so tell webpack to
-    // stub it out instead of installing the native canvas bindings.
-    config.resolve.alias = {
-      ...(config.resolve.alias ?? {}),
+    // konva transitively `require('canvas')` from `index-node.js` so it can
+    // render on node-canvas when present.  We never do node-canvas work
+    // (client components only, wrapped in `dynamic({ ssr: false })`), so
+    // tell webpack to treat the missing module as `false` instead of
+    // erroring the build.  Using `resolve.fallback` rather than an outright
+    // alias means any future code that *does* install and need node-canvas
+    // will still resolve to the real package.
+    config.resolve.fallback = {
+      ...(config.resolve.fallback ?? {}),
       canvas: false,
     };
     return config;

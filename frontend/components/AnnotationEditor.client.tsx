@@ -15,7 +15,6 @@ export type AnnotationEditorProps = {
   imageHeight: number;
   initial: AnnotationRow[];
   currentUserId: string;
-  canEdit: boolean;
 };
 
 const STAGE_HEIGHT = 640;
@@ -65,11 +64,14 @@ export function AnnotationEditorInner({
   imageHeight,
   initial,
   currentUserId,
-  canEdit,
 }: AnnotationEditorProps) {
   const supabase = useMemo(() => createClient(), []);
   const stageRef = useRef<Konva.Stage | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Tracks whether we've already fit the image to the stage.  Without this,
+  // any ResizeObserver firing (e.g. devtools toggled, sidebar opened) would
+  // reset the user's pan/zoom to the centred fit.
+  const didInitialFitRef = useRef(false);
 
   const [stageWidth, setStageWidth] = useState(960);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
@@ -93,32 +95,37 @@ export function AnnotationEditorInner({
     return () => ro.disconnect();
   }, []);
 
-  // Load image (HTMLImageElement for Konva.Image)
+  // Load image (HTMLImageElement for Konva.Image).
+  // No crossOrigin — we never call toDataURL, and signed Supabase URLs are
+  // not guaranteed to ship CORS headers, so requesting CORS can leave the
+  // image permanently in "loading" state.
   useEffect(() => {
     const img = new window.Image();
-    img.crossOrigin = "anonymous";
     img.src = imageUrl;
-    img.onload = () => setImage(img);
+    img.onload = () => {
+      setImage(img);
+      setError((prev) => (prev === "画像の読み込みに失敗しました" ? null : prev));
+    };
     img.onerror = () => setError("画像の読み込みに失敗しました");
   }, [imageUrl]);
 
-  // Initial fit: show whole image
-  const initialScale = useMemo(() => {
-    if (!image) return 1;
-    return Math.min(stageWidth / imageWidth, STAGE_HEIGHT / imageHeight);
-  }, [image, stageWidth, imageWidth, imageHeight]);
-
-  // Apply initial scale once on load
+  // Apply initial fit exactly once per image — otherwise every ResizeObserver
+  // tick (opening DevTools, toggling a sidebar, etc.) would snap the stage
+  // back and erase the user's pan/zoom.
   useEffect(() => {
-    if (!stageRef.current || !image) return;
+    if (!stageRef.current || !image || didInitialFitRef.current) return;
     const stage = stageRef.current;
-    stage.scale({ x: initialScale, y: initialScale });
-    // Centre
-    const cx = (stageWidth - imageWidth * initialScale) / 2;
-    const cy = (STAGE_HEIGHT - imageHeight * initialScale) / 2;
-    stage.position({ x: cx, y: cy });
+    const fit = Math.min(stageWidth / imageWidth, STAGE_HEIGHT / imageHeight);
+    stage.scale({ x: fit, y: fit });
+    stage.position({
+      x: (stageWidth - imageWidth * fit) / 2,
+      y: (STAGE_HEIGHT - imageHeight * fit) / 2,
+    });
     stage.batchDraw();
-  }, [image, initialScale, stageWidth, imageWidth, imageHeight]);
+    didInitialFitRef.current = true;
+    // Focus the editor container so our scoped key handler fires.
+    containerRef.current?.focus();
+  }, [image, stageWidth, imageWidth, imageHeight]);
 
   const handleWheel = (e: KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
@@ -144,7 +151,6 @@ export function AnnotationEditorInner({
   };
 
   const handleStageClick = (e: KonvaEventObject<MouseEvent>) => {
-    if (!canEdit) return;
     // While panning we never want a spurious click to add a vertex.
     if (panMode) return;
     // Ignore clicks on existing annotations (we use Line onClick for delete)
@@ -170,7 +176,6 @@ export function AnnotationEditorInner({
   }, []);
 
   const savePolygon = useCallback(async () => {
-    if (!canEdit) return;
     if (currentPolygon.length < 3) {
       setError("ポリゴンは 3 点以上必要です");
       return;
@@ -198,7 +203,7 @@ export function AnnotationEditorInner({
     } finally {
       setSaving(false);
     }
-  }, [canEdit, currentPolygon, currentClass, imageId, currentUserId, supabase]);
+  }, [currentPolygon, currentClass, imageId, currentUserId, supabase]);
 
   const deleteAnnotation = async (id: string) => {
     const { error: delErr } = await supabase.from("annotations").delete().eq("id", id);
@@ -209,38 +214,44 @@ export function AnnotationEditorInner({
     setAnnotations((prev) => prev.filter((a) => a.id !== id));
   };
 
-  // Keyboard: Enter closes polygon, Esc cancels, Backspace undoes last vertex,
-  // Space (held) enables pan mode so the user can scroll the stage around
-  // without losing the polygon in progress.
+  // Keyboard shortcuts scoped to the editor container (tabIndex={0}).
+  // Attaching via React's onKeyDown / onKeyUp on the container avoids
+  // hijacking Space on the rest of the page (e.g. activating a button or
+  // scrolling the viewport) the way a global `window` listener would.
+  const onContainerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+    if (e.code === "Space") {
+      e.preventDefault();
+      setPanMode(true);
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void savePolygon();
+    } else if (e.key === "Escape") {
+      cancelCurrent();
+    } else if (e.key === "Backspace") {
+      undoLast();
+    }
+  };
+
+  const onContainerKeyUp = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.code === "Space") setPanMode(false);
+  };
+
+  // A window-level keyup guarantees we clear panMode even if focus leaves
+  // the container while Space is held (e.g. Cmd-Tab on macOS eats keyup).
   useEffect(() => {
-    if (!canEdit) return;
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
-      if (e.code === "Space") {
-        e.preventDefault();
-        setPanMode(true);
-        return;
-      }
-      if (e.key === "Enter") {
-        e.preventDefault();
-        void savePolygon();
-      } else if (e.key === "Escape") {
-        cancelCurrent();
-      } else if (e.key === "Backspace") {
-        undoLast();
-      }
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
+    const onWindowKeyUp = (e: KeyboardEvent) => {
       if (e.code === "Space") setPanMode(false);
     };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("keyup", onWindowKeyUp);
+    window.addEventListener("blur", () => setPanMode(false));
     return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("keyup", onWindowKeyUp);
     };
-  }, [canEdit, savePolygon, cancelCurrent, undoLast]);
+  }, []);
 
   const currentClassColor = TISSUE_CLASS_BY_KEY[currentClass]?.color ?? "#888";
 
@@ -253,12 +264,11 @@ export function AnnotationEditorInner({
             key={c.key}
             type="button"
             onClick={() => setCurrentClass(c.key)}
-            disabled={!canEdit}
             className={`flex items-center gap-1 rounded border px-2 py-1 ${
               currentClass === c.key
                 ? "border-neutral-900 bg-neutral-100 dark:border-white dark:bg-neutral-800"
                 : "border-neutral-300 dark:border-neutral-700"
-            } disabled:opacity-50`}
+            }`}
           >
             <span
               aria-hidden
@@ -272,7 +282,10 @@ export function AnnotationEditorInner({
 
       <div
         ref={containerRef}
-        className="overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950"
+        tabIndex={0}
+        onKeyDown={onContainerKeyDown}
+        onKeyUp={onContainerKeyUp}
+        className="overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50 outline-none focus:ring-2 focus:ring-neutral-400 dark:border-neutral-800 dark:bg-neutral-950"
         style={{ height: STAGE_HEIGHT }}
       >
         {image ? (
@@ -280,11 +293,12 @@ export function AnnotationEditorInner({
             width={stageWidth}
             height={STAGE_HEIGHT}
             ref={stageRef}
-            draggable={canEdit ? currentPolygon.length === 0 || panMode : true}
+            draggable={currentPolygon.length === 0 || panMode}
             onWheel={handleWheel}
             onClick={handleStageClick}
             onTap={handleStageClick}
-            style={{ cursor: panMode ? "grab" : canEdit ? "crosshair" : "default" }}
+            onMouseDown={() => containerRef.current?.focus()}
+            style={{ cursor: panMode ? "grab" : "crosshair" }}
           >
             <Layer>
               <KonvaImage image={image} width={imageWidth} height={imageHeight} listening />
@@ -308,20 +322,12 @@ export function AnnotationEditorInner({
                     strokeWidth={2}
                     strokeScaleEnabled={false}
                     onClick={() => {
-                      if (
-                        canEdit &&
-                        isOwn &&
-                        window.confirm("このアノテーションを削除しますか？")
-                      ) {
+                      if (isOwn && window.confirm("このアノテーションを削除しますか？")) {
                         void deleteAnnotation(a.id);
                       }
                     }}
                     onTap={() => {
-                      if (
-                        canEdit &&
-                        isOwn &&
-                        window.confirm("このアノテーションを削除しますか？")
-                      ) {
+                      if (isOwn && window.confirm("このアノテーションを削除しますか？")) {
                         void deleteAnnotation(a.id);
                       }
                     }}
@@ -359,42 +365,34 @@ export function AnnotationEditorInner({
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        {canEdit ? (
-          <>
-            <button
-              type="button"
-              onClick={savePolygon}
-              disabled={saving || currentPolygon.length < 3}
-              className="rounded bg-neutral-900 px-3 py-1.5 font-medium text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
-            >
-              {saving ? "保存中…" : "確定して保存 (Enter)"}
-            </button>
-            <button
-              type="button"
-              onClick={undoLast}
-              disabled={currentPolygon.length === 0}
-              className="rounded border border-neutral-300 px-3 py-1.5 disabled:opacity-50 dark:border-neutral-700"
-            >
-              1点戻す (BS)
-            </button>
-            <button
-              type="button"
-              onClick={cancelCurrent}
-              disabled={currentPolygon.length === 0}
-              className="rounded border border-neutral-300 px-3 py-1.5 disabled:opacity-50 dark:border-neutral-700"
-            >
-              取消 (Esc)
-            </button>
-            <span className="text-xs text-neutral-500">
-              クリックで頂点追加、<kbd className="rounded border px-1">Space</kbd>
-              押しながらドラッグでパン、ホイールでズーム、既存ポリゴンをクリックで削除
-            </span>
-          </>
-        ) : (
-          <span className="text-xs text-neutral-500">
-            他ユーザーのプライベート画像のため、アノテーションの編集はできません（閲覧のみ）。
-          </span>
-        )}
+        <button
+          type="button"
+          onClick={savePolygon}
+          disabled={saving || currentPolygon.length < 3}
+          className="rounded bg-neutral-900 px-3 py-1.5 font-medium text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+        >
+          {saving ? "保存中…" : "確定して保存 (Enter)"}
+        </button>
+        <button
+          type="button"
+          onClick={undoLast}
+          disabled={currentPolygon.length === 0}
+          className="rounded border border-neutral-300 px-3 py-1.5 disabled:opacity-50 dark:border-neutral-700"
+        >
+          1点戻す (BS)
+        </button>
+        <button
+          type="button"
+          onClick={cancelCurrent}
+          disabled={currentPolygon.length === 0}
+          className="rounded border border-neutral-300 px-3 py-1.5 disabled:opacity-50 dark:border-neutral-700"
+        >
+          取消 (Esc)
+        </button>
+        <span className="text-xs text-neutral-500">
+          クリックで頂点追加、<kbd className="rounded border px-1">Space</kbd>
+          押しながらドラッグでパン、ホイールでズーム、既存ポリゴン（自分のもの）をクリックで削除
+        </span>
       </div>
 
       {error && (
@@ -408,6 +406,7 @@ export function AnnotationEditorInner({
         <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
           {annotations.map((a) => {
             const cls = TISSUE_CLASS_BY_KEY[a.class];
+            const ptCount = isWellFormedPolygon(a.polygon) ? a.polygon.length : "?";
             return (
               <li
                 key={a.id}
@@ -419,7 +418,7 @@ export function AnnotationEditorInner({
                   style={{ backgroundColor: cls?.color ?? "#888" }}
                 />
                 <span>{cls?.label ?? a.class}</span>
-                <span className="ml-auto text-neutral-500">{a.polygon.length} pts</span>
+                <span className="ml-auto text-neutral-500">{ptCount} pts</span>
               </li>
             );
           })}

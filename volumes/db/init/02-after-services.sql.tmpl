@@ -136,10 +136,13 @@ CREATE INDEX IF NOT EXISTS annotations_owner_idx ON public.annotations(owner_id)
 
 ALTER TABLE public.annotations ENABLE ROW LEVEL SECURITY;
 
+-- Annotations are considered research IP and only surface to signed-in users
+-- — `public`-visibility images themselves are readable anonymously, but we
+-- don't expose the labels that have been manually traced on top of them.
 DROP POLICY IF EXISTS "annotations read"        ON public.annotations;
 CREATE POLICY "annotations read"
   ON public.annotations FOR SELECT
-  TO anon, authenticated
+  TO authenticated
   USING (EXISTS (SELECT 1 FROM public.images WHERE id = annotations.image_id));
 
 DROP POLICY IF EXISTS "annotations insert"      ON public.annotations;
