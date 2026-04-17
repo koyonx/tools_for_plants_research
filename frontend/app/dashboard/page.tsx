@@ -1,4 +1,5 @@
 import { ImageThumbnail } from "@/components/ImageThumbnail";
+import { TrainingExportButton } from "@/components/TrainingExportButton";
 import { createClient } from "@/lib/supabase/server";
 import type { ImageRow } from "@/lib/supabase/types";
 import Link from "next/link";
@@ -25,14 +26,17 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">画像一覧</h1>
-        <Link
-          href="/dashboard/upload"
-          className="rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
-        >
-          + アップロード
-        </Link>
+        <div className="flex items-center gap-3">
+          <TrainingExportButton />
+          <Link
+            href="/dashboard/upload"
+            className="rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+          >
+            + アップロード
+          </Link>
+        </div>
       </div>
 
       {error && (

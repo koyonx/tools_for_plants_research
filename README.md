@@ -91,8 +91,10 @@ tools_for_plants_research/
 | #1 | インフラ土台 | ✅ マージ済 |
 | #2 | 認証 + 画像アップロード + ビューワー | ✅ マージ済 |
 | #3 | スケール検出 + 葉領域抽出 + 基本計測 | ✅ マージ済 |
-| #4 | ブラウザ内アノテーションワークフロー（本PR） | 🔨 進行中 |
-| #5 | 組織多クラス分割 + 気孔/維管束検出 | ⏳ |
+| #4 | ブラウザ内アノテーションワークフロー | ✅ マージ済 |
+| #5a | ポリゴン→マスクのラスタライズ + 学習データエクスポート（本PR） | 🔨 進行中 |
+| #5b | Cellpose で気孔/細胞検出 | ⏳ |
+| #5c | SegFormer 推論 + 訓練ノートブック | ⏳ |
 | #6 | 最短経路 + 透水マップ | ⏳ |
 | #7 | 精度検証 + リリース整備 | ⏳ |
 
@@ -128,6 +130,18 @@ Web 完結のポリゴンエディタ。napari は使わず、研究室内複数
 - 既存ポリゴンをクリックすると自分のものなら削除
 - `annotations` テーブルに polygon を JSON で保存（ピクセル座標、image_id にひも付け）
 - PR #5 でバックエンドが polygon をラスタライズして SegFormer の学習データに変換
+
+## 学習データエクスポート（PR #5a）
+
+PR #4 で保存したポリゴンアノテーションをラスタライズし、SegFormer / DeepLab などの semantic-segmentation トレーナに直接流し込める形で取り出せる。
+
+- **マスク形式**: `uint8` の 1 チャネル PNG、0 = 背景、1..10 がクラスインデックス（`backend/app/pipeline/rasterize.py::CLASS_INDEX`）
+- **重なり**: 後から描いたポリゴンが上書き（last-write-wins）
+- **エンドポイント**
+  - `GET /images/{id}/mask.png` — 1 枚の最新マスクを PNG で返す（エディタ画面から「マスクをダウンロード」で取得可）
+  - `GET /training/export.zip[?include_unlabelled=true]` — 閲覧可能な全画像を `images/<uuid>.<ext>` + `masks/<uuid>.png` で束ね、`classes.json`（クラスインデックス定義）と `index.json`（画像ごとのメタ情報）を同梱
+- **認可**: エンドポイントは caller の Supabase JWT を受け取り、RLS 経由でフィルタ（他人の private 画像は出てこない）
+- ダッシュボード右上の「学習データ zip」ボタンで一括ダウンロード
 
 ## データモデル / 権限
 

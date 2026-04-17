@@ -1,4 +1,5 @@
 import { AnnotationEditor } from "@/components/AnnotationEditor";
+import { MaskDownloadButton } from "@/components/MaskDownloadButton";
 import { toPublicSupabaseUrl } from "@/lib/supabase/public-url";
 import { createClient } from "@/lib/supabase/server";
 import type { AnnotationRow, ImageRow } from "@/lib/supabase/types";
@@ -59,7 +60,7 @@ export default async function AnnotatePage({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <Link
             href={`/dashboard/images/${image.id}`}
@@ -71,9 +72,10 @@ export default async function AnnotatePage({
             アノテーション: {image.original_filename ?? image.id}
           </h1>
           <p className="text-xs text-neutral-500">
-            学習データ用の手動ポリゴンラベル。PR #5 で深層学習の訓練に使用。
+            学習データ用の手動ポリゴンラベル。PR #5b 以降で深層学習の訓練に使用。
           </p>
         </div>
+        <MaskDownloadButton imageId={image.id} />
       </div>
 
       {signed?.signedUrl ? (
