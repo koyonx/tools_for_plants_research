@@ -1,4 +1,5 @@
 import { ImageViewer } from "@/components/ImageViewer";
+import { toPublicSupabaseUrl } from "@/lib/supabase/public-url";
 import { createClient } from "@/lib/supabase/server";
 import type { ImageRow } from "@/lib/supabase/types";
 import Link from "next/link";
@@ -61,7 +62,10 @@ export default async function ImageDetailPage({
       </div>
 
       {signed?.signedUrl ? (
-        <ImageViewer src={signed.signedUrl} alt={image.original_filename ?? image.id} />
+        <ImageViewer
+          src={toPublicSupabaseUrl(signed.signedUrl)}
+          alt={image.original_filename ?? image.id}
+        />
       ) : (
         <p className="rounded bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
           画像の署名付き URL を取得できませんでした。権限を確認してください。

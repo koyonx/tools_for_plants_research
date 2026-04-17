@@ -1,3 +1,4 @@
+import { toPublicSupabaseUrl } from "@/lib/supabase/public-url";
 import { createClient } from "@/lib/supabase/server";
 
 export async function ImageThumbnail({
@@ -19,7 +20,7 @@ export async function ImageThumbnail({
   }
   return (
     <img
-      src={data.signedUrl}
+      src={toPublicSupabaseUrl(data.signedUrl)}
       alt={alt}
       className="aspect-video w-full bg-neutral-50 object-cover dark:bg-neutral-900"
       loading="lazy"
