@@ -280,9 +280,12 @@ export function AnnotationEditorInner({
         ))}
       </div>
 
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: interactive annotation surface (role=application per WAI-ARIA); tabIndex is required so Space/Enter/Backspace reach the scoped onKeyDown handler instead of window. */}
       <div
         ref={containerRef}
         tabIndex={0}
+        role="application"
+        aria-label="ポリゴンアノテーションエディタ"
         onKeyDown={onContainerKeyDown}
         onKeyUp={onContainerKeyUp}
         className="overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50 outline-none focus:ring-2 focus:ring-neutral-400 dark:border-neutral-800 dark:bg-neutral-950"
