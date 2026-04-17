@@ -61,6 +61,42 @@ def test_measure_from_rectangular_mask() -> None:
     assert result.leaf_area_um2 == pytest.approx(60000.0)
 
 
+def test_measure_summary_stats_are_computed_on_full_profile() -> None:
+    """Downsampling for the chart must not bias mean/median/min/max.
+
+    The mask is 1000 columns wide with thickness increasing linearly per
+    column.  If summary stats were computed after sampling to 512 points,
+    they would shift noticeably; here we assert the exact values from the
+    full per-column array.
+    """
+    width = 700  # >> MAX_PROFILE_POINTS (512)
+    height = 800  # large enough that every thickness fits without clipping
+    mask = np.zeros((height, width), dtype=np.uint8)
+    # column i has thickness (i+1) px, centred vertically
+    for i in range(width):
+        thickness_px = i + 1
+        y0 = (height - thickness_px) // 2
+        mask[y0 : y0 + thickness_px, i] = 255
+
+    um_per_px = 0.5
+    result = measure_from_mask(mask, um_per_px)
+
+    # full-profile truth
+    expected_mean = float(np.mean(np.arange(1, width + 1))) * um_per_px
+    expected_median = float(np.median(np.arange(1, width + 1))) * um_per_px
+    expected_min = 1.0 * um_per_px
+    expected_max = float(width) * um_per_px
+
+    assert result.valid_columns == width
+    assert result.leaf_mean_thickness_um == pytest.approx(expected_mean)
+    assert result.leaf_median_thickness_um == pytest.approx(expected_median)
+    assert result.leaf_min_thickness_um == pytest.approx(expected_min)
+    assert result.leaf_max_thickness_um == pytest.approx(expected_max)
+    # chart data is capped
+    assert len(result.thickness_profile_um) <= 512
+    assert len(result.thickness_profile_x_um) == len(result.thickness_profile_um)
+
+
 def test_measure_empty_mask() -> None:
     mask = np.zeros((50, 50), dtype=np.uint8)
     result = measure_from_mask(mask, 1.0)

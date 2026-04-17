@@ -64,22 +64,26 @@ def measure_from_mask(mask: np.ndarray, um_per_px: float) -> MeasurementResult:
     last = h - 1 - np.argmax(bin_mask[::-1], axis=0)
     thickness_px = np.where(col_has_any, last - first + 1, 0).astype(np.float32)
     valid = thickness_px > 0
-    thickness_valid_um = thickness_px[valid] * um_per_px
+    # Summary stats come from the full per-column profile; downsampling only
+    # the chart data below keeps mean/median/min/max faithful on wide images.
+    xs_full = np.where(valid)[0]
+    thickness_full_um = thickness_px[valid] * um_per_px
 
-    # Downsample profile for storage
-    xs = np.where(valid)[0]
-    if len(xs) > MAX_PROFILE_POINTS:
-        idx = np.linspace(0, len(xs) - 1, MAX_PROFILE_POINTS).astype(np.int64)
-        xs = xs[idx]
-        thickness_valid_um = thickness_valid_um[idx]
+    if len(xs_full) > MAX_PROFILE_POINTS:
+        idx = np.linspace(0, len(xs_full) - 1, MAX_PROFILE_POINTS).astype(np.int64)
+        profile_xs = xs_full[idx]
+        profile_ys = thickness_full_um[idx]
+    else:
+        profile_xs = xs_full
+        profile_ys = thickness_full_um
 
     return MeasurementResult(
         leaf_area_um2=float(total_px) * (um_per_px**2),
-        leaf_mean_thickness_um=float(thickness_valid_um.mean()),
-        leaf_median_thickness_um=float(np.median(thickness_valid_um)),
-        leaf_min_thickness_um=float(thickness_valid_um.min()),
-        leaf_max_thickness_um=float(thickness_valid_um.max()),
-        thickness_profile_um=thickness_valid_um.astype(float).tolist(),
-        thickness_profile_x_um=(xs.astype(np.float64) * um_per_px).tolist(),
+        leaf_mean_thickness_um=float(thickness_full_um.mean()),
+        leaf_median_thickness_um=float(np.median(thickness_full_um)),
+        leaf_min_thickness_um=float(thickness_full_um.min()),
+        leaf_max_thickness_um=float(thickness_full_um.max()),
+        thickness_profile_um=profile_ys.astype(float).tolist(),
+        thickness_profile_x_um=(profile_xs.astype(np.float64) * um_per_px).tolist(),
         valid_columns=int(valid.sum()),
     )
