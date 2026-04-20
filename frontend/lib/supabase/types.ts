@@ -59,6 +59,28 @@ export type CellposeResult = {
   image_shape: { height_px: number; width_px: number };
 };
 
+export type SegFormerClassCoverage = {
+  class_key: string;
+  pixel_count: number;
+  area_px: number;
+  coverage_ratio: number;
+};
+
+export type SegFormerPolygon = {
+  class_key: string;
+  polygon: [number, number][];
+  area_px: number;
+};
+
+export type SegFormerResult = {
+  model_dir: string;
+  classes: string[];
+  coverage: SegFormerClassCoverage[];
+  polygons: SegFormerPolygon[];
+  downsample_factor: number;
+  image_shape: { height_px: number; width_px: number };
+};
+
 export type AnalysisRow = {
   id: string;
   image_id: string;

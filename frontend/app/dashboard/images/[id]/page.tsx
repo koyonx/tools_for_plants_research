@@ -1,6 +1,7 @@
 import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { CellposePanel } from "@/components/CellposePanel";
 import { ImageViewer } from "@/components/ImageViewer";
+import { SegFormerPanel } from "@/components/SegFormerPanel";
 import { toPublicSupabaseUrl } from "@/lib/supabase/public-url";
 import { createClient } from "@/lib/supabase/server";
 import type { AnalysisRow, BasicMeasurementResult, ImageRow } from "@/lib/supabase/types";
@@ -48,6 +49,15 @@ export default async function ImageDetailPage({
     .select("*")
     .eq("image_id", image.id)
     .eq("kind", "cellpose_cells")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<AnalysisRow>();
+
+  const { data: latestSegformer } = await supabase
+    .from("analyses")
+    .select("*")
+    .eq("image_id", image.id)
+    .eq("kind", "segformer_tissue")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<AnalysisRow>();
@@ -119,6 +129,15 @@ export default async function ImageDetailPage({
           imageId={image.id}
           imageUrl={toPublicSupabaseUrl(signed.signedUrl)}
           initial={latestCellpose ?? null}
+          umPerPx={umPerPx}
+          canRun={isOwner}
+        />
+      )}
+      {signed?.signedUrl && (
+        <SegFormerPanel
+          imageId={image.id}
+          imageUrl={toPublicSupabaseUrl(signed.signedUrl)}
+          initial={latestSegformer ?? null}
           umPerPx={umPerPx}
           canRun={isOwner}
         />

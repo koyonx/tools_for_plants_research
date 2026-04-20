@@ -37,7 +37,10 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.2,<3"
 
 # ---- runtime ------------------------------------------------------------
 FROM ml-deps AS runtime
-ENV CELLPOSE_LOCAL_MODELS_PATH=/root/.cellpose/models
+ENV CELLPOSE_LOCAL_MODELS_PATH=/root/.cellpose/models \
+    HF_HOME=/root/.cache/huggingface \
+    TRANSFORMERS_OFFLINE=0 \
+    PLANTS_SEGFORMER_DIR=/models/segformer
 COPY app ./app
 COPY tests ./tests
 
