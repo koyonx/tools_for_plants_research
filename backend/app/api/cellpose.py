@@ -9,6 +9,7 @@ background task so RLS still enforces ownership end-to-end.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from typing import Annotated, Any
 
@@ -95,7 +96,13 @@ async def _run_cellpose_bg(
         # even if torch/cellpose aren't available in the running image.
         from app.pipeline.cellpose_infer import detect_cells
 
-        result = detect_cells(
+        # Cellpose inference is a CPU-bound 30-60 s call.  Running it
+        # directly on the FastAPI event loop (where async BackgroundTasks
+        # execute) would freeze every other request - health, polling for
+        # the same analysis, other users - for the duration.  Hand it off
+        # to the default thread-pool executor instead.
+        result = await asyncio.to_thread(
+            detect_cells,
             image,
             max_side_px=int(parameters.get("max_side_px") or 1024),
             diameter=parameters.get("diameter"),

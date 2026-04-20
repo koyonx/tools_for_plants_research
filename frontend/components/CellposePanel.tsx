@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, CellposeResult } from "@/lib/supabase/types";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
 const POLL_INTERVAL_MS = 2500;
@@ -22,21 +22,36 @@ function isCellposeResult(r: AnalysisRow["result"]): r is CellposeResult {
 }
 
 export function CellposePanel({ imageId, imageUrl, initial, umPerPx, canRun }: Props) {
-  const supabase = createClient();
+  // `createClient()` returns a fresh SupabaseClient on every call, so
+  // memoise here — otherwise every re-render gives us a new reference,
+  // poisoning the poll-effect's dependency array.
+  const supabase = useMemo(() => createClient(), []);
   const [analysis, setAnalysis] = useState<AnalysisRow | null>(initial ?? null);
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirror live analysis state into a ref so the poll loop (kept stable
+  // across renders) can inspect the latest status without being
+  // recreated on every setAnalysis().
+  const analysisRef = useRef<AnalysisRow | null>(initial ?? null);
+  useEffect(() => {
+    analysisRef.current = analysis;
+  }, [analysis]);
 
-  const clearPoll = useCallback(() => {
+  const clearPoll = () => {
     if (pollRef.current) {
       clearTimeout(pollRef.current);
       pollRef.current = null;
     }
-  }, []);
+  };
 
-  const poll = useCallback(
-    async (id: string) => {
+  // Poll loop with no reactive dependencies.  We pass the JWT grabber +
+  // setter in closures captured from the first render; no re-creation
+  // on setAnalysis(), so each firing really does fire POLL_INTERVAL_MS
+  // apart instead of on every state change.
+  const pollRefFn = useRef<((id: string) => void) | null>(null);
+  if (pollRefFn.current === null) {
+    pollRefFn.current = async (id: string) => {
       try {
         const { data: sess } = await supabase.auth.getSession();
         if (!sess.session) return;
@@ -47,22 +62,25 @@ export function CellposePanel({ imageId, imageUrl, initial, umPerPx, canRun }: P
         const row = (await resp.json()) as AnalysisRow;
         setAnalysis(row);
         if (row.status === "running" || row.status === "pending") {
-          pollRef.current = setTimeout(() => poll(id), POLL_INTERVAL_MS);
+          pollRef.current = setTimeout(() => pollRefFn.current?.(id), POLL_INTERVAL_MS);
         }
       } catch {
         // swallow — next poll tick will retry
       }
-    },
-    [supabase],
-  );
+    };
+  }
 
-  // Resume polling if we load into a page whose analysis row is still running.
+  // Resume polling exactly once per initial `running`/`pending` row.
+  // Depending only on primitive id/status values keeps the effect from
+  // re-firing on every setAnalysis().
+  const initialId = initial?.id ?? null;
+  const initialStatus = initial?.status ?? null;
   useEffect(() => {
-    if (initial && (initial.status === "running" || initial.status === "pending")) {
-      void poll(initial.id);
+    if (initialId && (initialStatus === "running" || initialStatus === "pending")) {
+      pollRefFn.current?.(initialId);
     }
     return clearPoll;
-  }, [initial, poll, clearPoll]);
+  }, [initialId, initialStatus]);
 
   const kickOff = async () => {
     if (!canRun) return;
@@ -96,7 +114,7 @@ export function CellposePanel({ imageId, imageUrl, initial, umPerPx, canRun }: P
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
-      void poll(body.analysis_id);
+      pollRefFn.current?.(body.analysis_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
