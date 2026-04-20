@@ -58,20 +58,31 @@ export function CellposePanel({ imageId, imageUrl, initial, umPerPx, canRun }: P
   const pollRefFn = useRef<((id: string) => void) | null>(null);
   if (pollRefFn.current === null) {
     pollRefFn.current = async (id: string) => {
+      // Schedule the next tick unconditionally *unless* we observe a
+      // terminal row (done / error).  Transient failures (backend
+      // restart mid-run, DNS blip, 500) must not silently stop the
+      // loop — the user would otherwise be stuck on a "検出中…" UI
+      // with no recovery short of a page reload.
+      let terminal = false;
       try {
         const { data: sess } = await supabase.auth.getSession();
-        if (!sess.session) return;
+        if (!sess.session) return; // signed out — no point rescheduling
         const resp = await fetch(`${BACKEND_URL}/analyses/${id}`, {
           headers: { Authorization: `Bearer ${sess.session.access_token}` },
         });
-        if (!resp.ok) return;
-        const row = (await resp.json()) as AnalysisRow;
-        setAnalysis(row);
-        if (row.status === "running" || row.status === "pending") {
-          pollRef.current = setTimeout(() => pollRefFn.current?.(id), POLL_INTERVAL_MS);
+        if (resp.ok) {
+          const row = (await resp.json()) as AnalysisRow;
+          setAnalysis(row);
+          if (row.status === "done" || row.status === "error") {
+            terminal = true;
+          }
         }
+        // Non-ok responses fall through to re-scheduling below.
       } catch {
-        // swallow — next poll tick will retry
+        // Network error — same, fall through to re-schedule.
+      }
+      if (!terminal) {
+        pollRef.current = setTimeout(() => pollRefFn.current?.(id), POLL_INTERVAL_MS);
       }
     };
   }
