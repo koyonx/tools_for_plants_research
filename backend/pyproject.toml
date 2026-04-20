@@ -52,6 +52,11 @@ ignore = ["E501"]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+# numpy's type stubs declare `np.ndarray` as `ndarray[ShapeT, DType]` —
+# annotating every array with full type parameters adds a lot of noise for
+# little benefit in numeric code, and shape/dtype are validated at runtime
+# anyway.  Relax this one strict flag; keep the rest.
+disallow_any_generics = false
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
