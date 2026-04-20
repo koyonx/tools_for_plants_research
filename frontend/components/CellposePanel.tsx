@@ -38,12 +38,18 @@ export function CellposePanel({ imageId, imageUrl, initial, umPerPx, canRun }: P
     analysisRef.current = analysis;
   }, [analysis]);
 
-  const clearPoll = () => {
-    if (pollRef.current) {
-      clearTimeout(pollRef.current);
-      pollRef.current = null;
-    }
-  };
+  // Ref-backed stable identity; safe to pass to useEffect cleanup without
+  // tripping Biome's exhaustive-deps rule.
+  const clearPollRef = useRef<(() => void) | null>(null);
+  if (clearPollRef.current === null) {
+    clearPollRef.current = () => {
+      if (pollRef.current) {
+        clearTimeout(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }
+  const clearPoll = clearPollRef.current;
 
   // Poll loop with no reactive dependencies.  We pass the JWT grabber +
   // setter in closures captured from the first render; no re-creation
@@ -80,7 +86,7 @@ export function CellposePanel({ imageId, imageUrl, initial, umPerPx, canRun }: P
       pollRefFn.current?.(initialId);
     }
     return clearPoll;
-  }, [initialId, initialStatus]);
+  }, [initialId, initialStatus, clearPoll]);
 
   const kickOff = async () => {
     if (!canRun) return;
