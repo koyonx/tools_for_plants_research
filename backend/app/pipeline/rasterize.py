@@ -60,7 +60,9 @@ def rasterize_annotations(
         # rows (pre-PR-4-round-2) may still be out of range.
         pts[:, 0] = np.clip(pts[:, 0], 0, image_width - 1)
         pts[:, 1] = np.clip(pts[:, 1], 0, image_height - 1)
-        cv2.fillPoly(mask, [pts.reshape(-1, 1, 2)], color=int(idx))
+        # `color` must be a sequence for cv2's type stubs even on single-
+        # channel masks; `(idx,)` is the canonical single-channel form.
+        cv2.fillPoly(mask, [pts.reshape(-1, 1, 2)], color=(int(idx),))
 
     return mask
 

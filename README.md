@@ -92,8 +92,8 @@ tools_for_plants_research/
 | #2 | 認証 + 画像アップロード + ビューワー | ✅ マージ済 |
 | #3 | スケール検出 + 葉領域抽出 + 基本計測 | ✅ マージ済 |
 | #4 | ブラウザ内アノテーションワークフロー | ✅ マージ済 |
-| #5a | ポリゴン→マスクのラスタライズ + 学習データエクスポート（本PR） | 🔨 進行中 |
-| #5b | Cellpose で気孔/細胞検出 | ⏳ |
+| #5a | ポリゴン→マスクのラスタライズ + 学習データエクスポート | ✅ マージ済 |
+| #5b | Cellpose で細胞/気孔候補の自動検出（本PR） | 🔨 進行中 |
 | #5c | SegFormer 推論 + 訓練ノートブック | ⏳ |
 | #6 | 最短経路 + 透水マップ | ⏳ |
 | #7 | 精度検証 + リリース整備 | ⏳ |
@@ -130,6 +130,19 @@ Web 完結のポリゴンエディタ。napari は使わず、研究室内複数
 - 既存ポリゴンをクリックすると自分のものなら削除
 - `annotations` テーブルに polygon を JSON で保存（ピクセル座標、image_id にひも付け）
 - PR #5 でバックエンドが polygon をラスタライズして SegFormer の学習データに変換
+
+## Cellpose 細胞検出（PR #5b）
+
+Cellpose 3 の cyto3 generalist モデルを使って、1 クリックで細胞単位のセグメンテーション（細胞数・平均面積・個別ポリゴン）が取れる。
+
+- **Backend**: `pipeline/cellpose_infer.py`（遅延シングルトンで model 読み込み、最大辺 1024px に down-sample → 原座標にスケール戻し）
+- **Endpoint**: `POST /images/{id}/analyze/cellpose` → `analyses` 行に `kind='cellpose_cells'`, `status='running'` で insert し、FastAPI BackgroundTasks で推論本体を走らせる
+- **Polling**: フロントは `GET /analyses/{id}` を 2.5s 間隔でポーリング、`done` / `error` で停止
+- **UI**: 画像詳細ページに「Cellpose 細胞検出」パネル。完了後は細胞数・平均/中央面積（スケール有りなら µm²）と、検出ポリゴンを透過 SVG で重ねた overlay を表示
+- **Docker**: PyTorch (CPU wheel) + Cellpose はランタイム image のみに載せる (`pyproject` の `ml` extra)。CI の lint/type/test レイヤは軽いまま
+- **モデルキャッシュ**: `plants-ml-cache` 名前付きボリュームで `/root/.cellpose` を永続化（初回推論時に ~26MB の cyto3 重みを DL）
+
+M2 Mac（CPU）で 1 枚 30〜60 秒程度。GPU (CUDA/MPS) があれば数秒。
 
 ## 学習データエクスポート（PR #5a）
 

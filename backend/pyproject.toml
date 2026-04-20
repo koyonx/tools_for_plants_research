@@ -12,7 +12,7 @@ dependencies = [
     "supabase>=2.9.0",
     "httpx>=0.27.0",
     "opencv-python-headless>=4.10.0",
-    "numpy>=1.26.0",
+    "numpy>=1.26.0,<2.0",
     "scipy>=1.13.0",
     "Pillow>=10.4.0",
 ]
@@ -24,6 +24,13 @@ dev = [
     "ruff>=0.7.0",
     "mypy>=1.13.0",
     "types-requests>=2.32.0",
+]
+# The `ml` extra carries PyTorch + Cellpose so the lightweight checks
+# (ruff / mypy / pytest) in CI don't pay the ~1.5 GB install every run.
+# The runtime image installs it explicitly via the Dockerfile.
+ml = [
+    "torch>=2.2,<3",
+    "cellpose>=3.1.0,<4",
 ]
 
 [build-system]
@@ -45,6 +52,11 @@ ignore = ["E501"]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+# numpy's type stubs declare `np.ndarray` as `ndarray[ShapeT, DType]` —
+# annotating every array with full type parameters adds a lot of noise for
+# little benefit in numeric code, and shape/dtype are validated at runtime
+# anyway.  Relax this one strict flag; keep the rest.
+disallow_any_generics = false
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -26,8 +26,18 @@ RUN mkdir -p app && touch app/__init__.py && \
     pip install --upgrade pip && \
     pip install -e ".[dev]"
 
+# ---- ml layer (torch + cellpose) ----------------------------------------
+# Pull the CPU-only PyTorch wheel explicitly so we don't drag in CUDA
+# libraries that would balloon the image to ~5 GB.  Cellpose will
+# auto-download its ~26 MB `cyto3` weights on first inference; mount a
+# named volume on /root/.cellpose to keep them warm across restarts.
+FROM deps AS ml-deps
+RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.2,<3" && \
+    pip install -e ".[dev,ml]"
+
 # ---- runtime ------------------------------------------------------------
-FROM deps AS runtime
+FROM ml-deps AS runtime
+ENV CELLPOSE_LOCAL_MODELS_PATH=/root/.cellpose/models
 COPY app ./app
 COPY tests ./tests
 

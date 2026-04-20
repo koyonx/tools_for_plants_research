@@ -43,6 +43,22 @@ export type BasicMeasurementResult = {
   image_shape: { height_px: number; width_px: number };
 };
 
+export type CellposeCell = {
+  polygon: [number, number][]; // original image pixel space
+  centroid: [number, number];
+  area_px: number;
+};
+
+export type CellposeResult = {
+  model: string;
+  cell_count: number;
+  downsample_factor: number;
+  mean_area_px: number;
+  median_area_px: number;
+  cells: CellposeCell[];
+  image_shape: { height_px: number; width_px: number };
+};
+
 export type AnalysisRow = {
   id: string;
   image_id: string;
