@@ -200,6 +200,11 @@ validate: ## Compare basic_measurement output against ../measure_results.xlsx
 		echo "error: $(PYTHON) not found.  Override with 'make validate PYTHON=python'."; \
 		exit 1; \
 	}
+	@$(PYTHON) -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' || { \
+		echo "error: $(PYTHON) is too old (need 3.11+).  On macOS CLT (3.9), install a newer interpreter:"; \
+		echo "  brew install python@3.12 && make validate PYTHON=python3.12"; \
+		exit 1; \
+	}
 	@set -a && [ -f $(ENV_FILE) ] && . $(ENV_FILE); set +a; \
 	if [ -n "$$VALIDATE_TOKEN" ]; then \
 		$(PYTHON) scripts/validate_against_xlsx.py \

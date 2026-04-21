@@ -2,7 +2,7 @@
 name = "plants-research-backend"
 version = "0.1.0"
 description = "FastAPI backend for plant tissue image analysis"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
