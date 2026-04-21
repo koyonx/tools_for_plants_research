@@ -170,19 +170,39 @@ check: lint typecheck test ## Full quality gate (what CI runs)
 # ----------------------------------------------------------------------------
 
 .PHONY: smoke
-smoke: ## Boot the stack + curl /health and /analyze/segformer/status
+smoke: ## Boot the stack + poll /health, /analyze/segformer/status, frontend
 	@$(COMPOSE) up -d
-	@echo "waiting 5s for backend to come up…"; sleep 5
+	@echo "polling backend /health (cold start can take a minute on first run)…"
+	@for i in $$(seq 1 60); do \
+		curl -fsS http://localhost:8001/health >/dev/null 2>&1 && break; \
+		sleep 2; \
+	done
 	@printf "/health → "; curl -fsS http://localhost:8001/health || (echo FAIL; exit 1); echo
 	@printf "/analyze/segformer/status → "; curl -fsS http://localhost:8001/analyze/segformer/status || true; echo
 	@printf "frontend / → "; curl -fsS -o /dev/null -w "%{http_code}\n" http://localhost:3000
 
+.PHONY: stop
+stop: ## Pause every service without removing containers (resume with `make up`)
+	$(COMPOSE) stop
+
 .PHONY: validate
 validate: ## Compare basic_measurement output against ../measure_results.xlsx
-	python scripts/validate_against_xlsx.py \
-		--xlsx ../measure_results.xlsx \
-		--reference-um 100 \
-		--user-email "$$VALIDATE_EMAIL"
+	@[ -n "$$VALIDATE_EMAIL$$VALIDATE_TOKEN" ] || { \
+		echo "error: set VALIDATE_EMAIL=you@example.com (password account) or VALIDATE_TOKEN=<jwt> (paste from devtools)"; \
+		exit 1; \
+	}
+	@set -a && [ -f $(ENV_FILE) ] && . $(ENV_FILE); set +a; \
+	if [ -n "$$VALIDATE_TOKEN" ]; then \
+		python scripts/validate_against_xlsx.py \
+			--xlsx ../measure_results.xlsx \
+			--reference-um 100 \
+			--access-token "$$VALIDATE_TOKEN"; \
+	else \
+		python scripts/validate_against_xlsx.py \
+			--xlsx ../measure_results.xlsx \
+			--reference-um 100 \
+			--user-email "$$VALIDATE_EMAIL"; \
+	fi
 
 .PHONY: compose-config
 compose-config: ## Validate the docker-compose YAML chain

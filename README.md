@@ -31,6 +31,8 @@
 - **ML**: classical CV (OpenCV + numpy + scipy) + Cellpose 3 + HuggingFace transformers (SegFormer) + scikit-fmm
 - **DB / auth / storage**: Supabase self-hosted; idempotent post-init bootstrap container
 
+> **Required tooling**: GNU make 4+ (default on Linux; on macOS install via `brew install make` if `make --version` reports something older).  Docker Desktop 4.30+, Docker Compose v2.20+.
+
 ## クイックスタート
 
 ```bash
@@ -156,12 +158,19 @@ open http://localhost:3001                    # Supabase Studio
 ```bash
 # stack を起動 + 検証対象画像を UI からアップ
 make up
-# 検証
+
+# 認証は 2 通り：
+#  (a) password 持ちアカウント → メール指定（プロンプトで入力）
 VALIDATE_EMAIL="you@example.com" make validate
-# → outputs/validation_report.md + .json が生成される
+#  (b) magic-link アカウントは password が無いので、ブラウザ DevTools
+#      → Application → Local Storage → sb-...-auth-token から
+#      access_token を取り出して環境変数で渡す
+VALIDATE_TOKEN="eyJhbGciOi..." make validate
+
+# → outputs/validation_report.md + .json が cwd 直下に生成される
 ```
 
-スクリプトは N 行に拡張可能。`測定タイプ=Distance` `メモ=厚さ` を `leaf_mean_thickness_um` に、`メモ=葉肉の厚さ` を `leaf_median_thickness_um` にマッピング。`維管束面積` は basic_measurement では出ないので「N/A」（SegFormer の xylem polygon 面積で別途比較）。
+`make validate` は `.env` を自動 source するので `ANON_KEY` 等は事前 export 不要。スクリプトは N 行に拡張可能。`測定タイプ=Distance` `メモ=厚さ` → `leaf_mean_thickness_um`、`メモ=葉肉の厚さ` → `leaf_median_thickness_um` のマッピングは `--metric-map '{...}'` で上書き可能。`維管束面積` は basic_measurement では出ないので N/A（SegFormer の xylem polygon 面積で別途比較）。
 
 ## データモデル / 権限
 
