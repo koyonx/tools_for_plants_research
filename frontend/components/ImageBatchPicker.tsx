@@ -18,6 +18,9 @@ const PIPELINE_CHOICES: { key: string; label: string }[] = [
 
 type Props = {
   initial: ImageRow[];
+  /** auth.users.id of the current caller — unowned images are disabled
+   *  in the batch picker because the backend 403s on non-owned inputs. */
+  currentUserId: string | null;
 };
 
 type SignedUrlEntry = { url: string; expiresAt: number };
@@ -32,7 +35,7 @@ type SignedUrlEntry = { url: string; expiresAt: number };
  * cache them for the session in a `useState` map so re-filtering
  * doesn't refetch.
  */
-export function ImageBatchPicker({ initial }: Props) {
+export function ImageBatchPicker({ initial, currentUserId }: Props) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [images, setImages] = useState<ImageRow[]>(initial);
@@ -90,6 +93,8 @@ export function ImageBatchPicker({ initial }: Props) {
   const plantOptions = uniq(images.map((i) => i.plant_id));
   const treatmentOptions = uniq(images.map((i) => i.treatment));
 
+  const isOwned = (img: ImageRow) => currentUserId !== null && img.owner_id === currentUserId;
+
   const toggle = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -99,7 +104,10 @@ export function ImageBatchPicker({ initial }: Props) {
     });
   };
 
-  const selectAllVisible = () => setSelected(new Set(filtered.map((i) => i.id)));
+  // Only owned images can be queued — the backend 403s on non-owned
+  // image_ids, and silently dropping them from the button is worse UX
+  // than excluding them from the selection up front.
+  const selectAllVisible = () => setSelected(new Set(filtered.filter(isOwned).map((i) => i.id)));
   const clearSelection = () => setSelected(new Set());
   const togglePipeline = (key: string) => {
     setPipelines((prev) => {
@@ -271,15 +279,19 @@ export function ImageBatchPicker({ initial }: Props) {
         </p>
       ) : (
         <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((img) => (
-            <ImageCard
-              key={img.id}
-              img={img}
-              checked={selected.has(img.id)}
-              onToggle={() => toggle(img.id)}
-              thumbFor={thumbFor}
-            />
-          ))}
+          {filtered.map((img) => {
+            const owned = isOwned(img);
+            return (
+              <ImageCard
+                key={img.id}
+                img={img}
+                checked={selected.has(img.id)}
+                onToggle={() => toggle(img.id)}
+                thumbFor={thumbFor}
+                selectable={owned}
+              />
+            );
+          })}
         </ul>
       )}
     </div>
@@ -291,11 +303,13 @@ function ImageCard({
   checked,
   onToggle,
   thumbFor,
+  selectable,
 }: {
   img: ImageRow;
   checked: boolean;
   onToggle: () => void;
   thumbFor: (path: string) => Promise<string | null>;
+  selectable: boolean;
 }) {
   const [thumb, setThumb] = useState<string | null>(null);
   useEffect(() => {
@@ -323,11 +337,19 @@ function ImageCard({
             <div className="flex aspect-video items-center justify-center bg-neutral-100 text-xs text-neutral-500 dark:bg-neutral-900" />
           )}
         </Link>
-        <label className="absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded bg-white/90 shadow dark:bg-neutral-900/90">
+        <label
+          className={`absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded shadow ${
+            selectable
+              ? "bg-white/90 dark:bg-neutral-900/90"
+              : "cursor-not-allowed bg-neutral-200/80 dark:bg-neutral-800/80"
+          }`}
+          title={selectable ? undefined : "バッチ解析はオーナー本人の画像のみ対象"}
+        >
           <input
             type="checkbox"
             checked={checked}
             onChange={onToggle}
+            disabled={!selectable}
             aria-label="select for batch"
           />
         </label>

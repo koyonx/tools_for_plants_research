@@ -27,6 +27,7 @@ import numpy as np
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.core.supabase_http import SupabaseAuthedClient, SupabaseHttpError
 
 router = APIRouter()
@@ -159,9 +160,19 @@ async def create_batch_run(
     except SupabaseHttpError as e:
         raise HTTPException(status_code=e.status, detail=e.detail) from e
 
+    # The upfront ownership check above established that `owner_id` really
+    # owns every `image_id`, so the worker itself no longer needs the
+    # user's (short-lived ~1h) JWT.  Hand it the service-role key instead
+    # — that bypasses RLS, never expires, and keeps batches that run past
+    # the caller's token lifetime (Cellpose/SegFormer over hundreds of
+    # images) from 401'ing mid-run and leaving the row stuck on
+    # `running`.  We record `owner_id` on each inserted analyses row via
+    # the image's owner so downstream RLS-aware reads still work for
+    # regular users.
+    worker_jwt = settings.service_role_key or jwt
     background_tasks.add_task(
         _run_batch_bg,
-        jwt,
+        worker_jwt,
         batch["id"],
         payload.image_ids,
         sorted_kinds,
@@ -219,9 +230,15 @@ async def _run_pipeline(
         from app.pipeline.scale import detect_scale_bar
         from app.pipeline.segment import leaf_mask
 
-        scale = detect_scale_bar(image_bgr, float(params["reference_um"]))
-        mask = leaf_mask(image_bgr)
-        measurement = measure_from_mask(mask, scale.um_per_px)
+        # Wrap the OpenCV/NumPy pass in `asyncio.to_thread` like the heavier
+        # pipelines do — on a 100-image batch these calls would otherwise
+        # stack up on the event loop and block /health and poll requests.
+        def _do_basic() -> tuple[Any, Any]:
+            scale = detect_scale_bar(image_bgr, float(params["reference_um"]))
+            mask = leaf_mask(image_bgr)
+            return scale, measure_from_mask(mask, scale.um_per_px)
+
+        scale, measurement = await asyncio.to_thread(_do_basic)
         basic_blob: dict[str, Any] = {
             "scale": {
                 "um_per_px": scale.um_per_px,

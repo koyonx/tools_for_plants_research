@@ -8,11 +8,11 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const supabase = createClient();
-  const { data: images, error } = await supabase
-    .from("images")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(300);
+  const [{ data: images, error }, { data: userData }] = await Promise.all([
+    supabase.from("images").select("*").order("created_at", { ascending: false }).limit(300),
+    supabase.auth.getUser(),
+  ]);
+  const currentUserId = userData.user?.id ?? null;
 
   return (
     <div className="space-y-6">
@@ -41,7 +41,9 @@ export default async function DashboardPage() {
         </p>
       )}
 
-      {images && images.length > 0 && <ImageBatchPicker initial={images as ImageRow[]} />}
+      {images && images.length > 0 && (
+        <ImageBatchPicker initial={images as ImageRow[]} currentUserId={currentUserId} />
+      )}
     </div>
   );
 }
