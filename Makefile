@@ -185,20 +185,29 @@ smoke: ## Boot the stack + poll /health, /analyze/segformer/status, frontend
 stop: ## Pause every service without removing containers (resume with `make up`)
 	$(COMPOSE) stop
 
+# `python3` rather than `python` — modern macOS (and many Linux distros)
+# only ship the versioned binary.  Override with `make validate PYTHON=python`
+# if you're pinned to a venv where the unversioned name works.
+PYTHON ?= python3
+
 .PHONY: validate
 validate: ## Compare basic_measurement output against ../measure_results.xlsx
 	@[ -n "$$VALIDATE_EMAIL$$VALIDATE_TOKEN" ] || { \
 		echo "error: set VALIDATE_EMAIL=you@example.com (password account) or VALIDATE_TOKEN=<jwt> (paste from devtools)"; \
 		exit 1; \
 	}
+	@command -v $(PYTHON) >/dev/null || { \
+		echo "error: $(PYTHON) not found.  Override with 'make validate PYTHON=python'."; \
+		exit 1; \
+	}
 	@set -a && [ -f $(ENV_FILE) ] && . $(ENV_FILE); set +a; \
 	if [ -n "$$VALIDATE_TOKEN" ]; then \
-		python scripts/validate_against_xlsx.py \
+		$(PYTHON) scripts/validate_against_xlsx.py \
 			--xlsx ../measure_results.xlsx \
 			--reference-um 100 \
 			--access-token "$$VALIDATE_TOKEN"; \
 	else \
-		python scripts/validate_against_xlsx.py \
+		$(PYTHON) scripts/validate_against_xlsx.py \
 			--xlsx ../measure_results.xlsx \
 			--reference-um 100 \
 			--user-email "$$VALIDATE_EMAIL"; \

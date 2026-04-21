@@ -8,9 +8,20 @@ hasn't tagged a release yet, so everything below is on `main`.
 
 ### PR #7 — validation + release polish (current)
 - `scripts/validate_against_xlsx.py` to compare basic-measurement output
-  against the legacy `measure_results.xlsx` ground truth.
-- `Makefile` with 30+ operator targets (`make help` for the full list).
-- Top-level README rewritten as an end-to-end walkthrough.
+  against the legacy `measure_results.xlsx` ground truth.  Supports three
+  auth modes (`--access-token` for magic-link users, `--user-email` +
+  password, `--service-role` for unattended runs), `--metric-map` JSON
+  override, unicode-aware `_parse_value`, and strict duplicate-filename
+  detection.
+- `Makefile` with 30+ operator targets (`make help` for the full list),
+  auto-sources `.env` in `make validate`, honours `PYTHON` override
+  (defaults to `python3`), has a `make stop` non-destructive pause,
+  and `make smoke` polls `/health` instead of sleeping 5 s.
+- `openpyxl` added to the backend `dev` extra so
+  `pip install -e 'backend[dev]'` prepares the host for validation.
+- Top-level README rewritten as an end-to-end walkthrough, with GNU
+  make 4+ noted as a prereq and the validation section covering both
+  auth modes and the host-side `pip install` step.
 - This `CHANGELOG.md`.
 
 ### PR #6 — water-transport analysis

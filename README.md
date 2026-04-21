@@ -156,19 +156,26 @@ open http://localhost:3001                    # Supabase Studio
 旧手動ツールで作った `measure_results.xlsx` を ground truth として、basic_measurement の出力との誤差レポートを生成。
 
 ```bash
-# stack を起動 + 検証対象画像を UI からアップ
+# 0) ホスト側 Python に openpyxl + httpx を入れておく（初回のみ）
+#    venv 推奨: python3 -m venv .venv && source .venv/bin/activate
+pip install -e 'backend[dev]'
+# もしくは最小: pip install openpyxl httpx
+
+# 1) stack を起動 + 検証対象画像を UI からアップ
 make up
 
-# 認証は 2 通り：
-#  (a) password 持ちアカウント → メール指定（プロンプトで入力）
+# 2) 認証は 2 通り：
+#    (a) password 持ちアカウント → メール指定（プロンプトで入力）
 VALIDATE_EMAIL="you@example.com" make validate
-#  (b) magic-link アカウントは password が無いので、ブラウザ DevTools
-#      → Application → Local Storage → sb-...-auth-token から
-#      access_token を取り出して環境変数で渡す
+#    (b) magic-link アカウントは password が無いので、ブラウザ DevTools
+#        → Application → Local Storage → sb-...-auth-token から
+#        access_token を取り出して環境変数で渡す
 VALIDATE_TOKEN="eyJhbGciOi..." make validate
 
 # → outputs/validation_report.md + .json が cwd 直下に生成される
 ```
+
+> Python は `python3` を期待する。`python` しか無い環境では `make validate PYTHON=python` で上書き可能。
 
 `make validate` は `.env` を自動 source するので `ANON_KEY` 等は事前 export 不要。スクリプトは N 行に拡張可能。`測定タイプ=Distance` `メモ=厚さ` → `leaf_mean_thickness_um`、`メモ=葉肉の厚さ` → `leaf_median_thickness_um` のマッピングは `--metric-map '{...}'` で上書き可能。`維管束面積` は basic_measurement では出ないので N/A（SegFormer の xylem polygon 面積で別途比較）。
 
