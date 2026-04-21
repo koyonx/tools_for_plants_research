@@ -24,6 +24,9 @@ TISSUE_CLASSES: tuple[TissueClass, ...] = (
     TissueClass("spongy", "海綿状葉肉", "#22c55e"),
     TissueClass("bundle_sheath", "維管束鞘", "#06b6d4"),
     TissueClass("xylem", "木部", "#3b82f6"),
+    # 導管 (vessels) — preferred FMM source for the water-transport
+    # pipeline (PR #6); falls back to `xylem` when not annotated.
+    TissueClass("xylem_vessel", "導管", "#1d4ed8"),
     TissueClass("phloem", "師部", "#8b5cf6"),
     TissueClass("stomata", "気孔", "#ec4899"),
     TissueClass("intercellular", "細胞間隙", "#14b8a6"),

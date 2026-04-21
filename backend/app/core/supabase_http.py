@@ -107,6 +107,32 @@ class SupabaseAuthedClient:
         rows: list[dict[str, Any]] = response.json()
         return rows[0] if rows else None
 
+    async def latest_analysis_for(
+        self,
+        image_id: str,
+        kind: str,
+        *,
+        status: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Most recent analyses row for the given image + kind, or None.
+
+        Pass `status="done"` to only consider completed runs — useful so
+        a freshly-failed retry doesn't shadow an older successful result
+        in workflows that depend on the previous output.
+        """
+        params: dict[str, str] = {
+            "image_id": f"eq.{image_id}",
+            "kind": f"eq.{kind}",
+            "select": "*",
+            "order": "created_at.desc",
+            "limit": "1",
+        }
+        if status is not None:
+            params["status"] = f"eq.{status}"
+        response = await self._request("GET", "/rest/v1/analyses", params=params)
+        rows: list[dict[str, Any]] = response.json()
+        return rows[0] if rows else None
+
     # ---- Storage --------------------------------------------------------
     async def download_image_bytes(self, storage_path: str) -> bytes:
         response = await self._request(

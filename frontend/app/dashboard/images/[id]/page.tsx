@@ -2,6 +2,7 @@ import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { CellposePanel } from "@/components/CellposePanel";
 import { ImageViewer } from "@/components/ImageViewer";
 import { SegFormerPanel } from "@/components/SegFormerPanel";
+import { WaterPathPanel } from "@/components/WaterPathPanel";
 import { toPublicSupabaseUrl } from "@/lib/supabase/public-url";
 import { createClient } from "@/lib/supabase/server";
 import type { AnalysisRow, BasicMeasurementResult, ImageRow } from "@/lib/supabase/types";
@@ -58,6 +59,15 @@ export default async function ImageDetailPage({
     .select("*")
     .eq("image_id", image.id)
     .eq("kind", "segformer_tissue")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<AnalysisRow>();
+
+  const { data: latestWaterPath } = await supabase
+    .from("analyses")
+    .select("*")
+    .eq("image_id", image.id)
+    .eq("kind", "water_path")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<AnalysisRow>();
@@ -140,6 +150,19 @@ export default async function ImageDetailPage({
           initial={latestSegformer ?? null}
           umPerPx={umPerPx}
           canRun={isOwner}
+        />
+      )}
+      {signed?.signedUrl && image.width_px && image.height_px && (
+        <WaterPathPanel
+          imageId={image.id}
+          imageUrl={toPublicSupabaseUrl(signed.signedUrl)}
+          initial={latestWaterPath ?? null}
+          hasSegformerResult={Boolean(
+            latestSegformer && latestSegformer.status === "done" && latestSegformer.result,
+          )}
+          canRun={isOwner}
+          imageWidth={image.width_px}
+          imageHeight={image.height_px}
         />
       )}
     </div>

@@ -9,6 +9,7 @@ export type TissueClassKey =
   | "spongy"
   | "bundle_sheath"
   | "xylem"
+  | "xylem_vessel"
   | "phloem"
   | "stomata"
   | "intercellular"
@@ -27,6 +28,10 @@ export const TISSUE_CLASSES: readonly TissueClass[] = [
   { key: "spongy", label: "海綿状葉肉", color: "#22c55e" },
   { key: "bundle_sheath", label: "維管束鞘", color: "#06b6d4" },
   { key: "xylem", label: "木部", color: "#3b82f6" },
+  // 導管 (vessels) — actual water-conducting tissue.  Optional layer:
+  // if annotators trace it, the water-transport analysis prefers it
+  // over the broader xylem region as the FMM source.
+  { key: "xylem_vessel", label: "導管", color: "#1d4ed8" },
   { key: "phloem", label: "師部", color: "#8b5cf6" },
   { key: "stomata", label: "気孔", color: "#ec4899" },
   { key: "intercellular", label: "細胞間隙", color: "#14b8a6" },

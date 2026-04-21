@@ -84,6 +84,36 @@ export type SegFormerResult = {
   image_shape: { height_px: number; width_px: number };
 };
 
+export type StomatumPath = {
+  centroid: [number, number];
+  travel_time: number;
+  travel_time_um: number | null;
+  straight_line_um: number | null;
+  nearest_source: [number, number];
+  // Polyline traced down the FMM travel-time gradient (original-image
+  // coords).  Frontend renders it instead of the straight-line link
+  // when present.
+  route?: [number, number][];
+  // True when the trace was snapped to the Euclidean-nearest source
+  // because gradient descent plateaued or hit the step budget — UI
+  // dashes that final segment.
+  truncated?: boolean;
+};
+
+export type WaterPathResult = {
+  source_class: "xylem_vessel" | "xylem";
+  sink_count: number;
+  travel_time_min: number;
+  travel_time_mean: number;
+  travel_time_max: number;
+  travel_time_p50: number;
+  paths: StomatumPath[];
+  heatmap_png_base64: string;
+  heatmap_shape: [number, number];
+  downsample_factor: number;
+  resistance: Record<string, number>;
+};
+
 export type AnalysisRow = {
   id: string;
   image_id: string;
