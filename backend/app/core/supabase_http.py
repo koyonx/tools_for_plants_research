@@ -158,9 +158,18 @@ class SupabaseAuthedClient:
         kind: str | None = None,
         status: str | None = None,
         order: str = "created_at.desc",
+        page_size: int = 1000,
+        max_rows: int = 20_000,
     ) -> list[dict[str, Any]]:
         """Filtered analyses list.  `image_ids` becomes a PostgREST
-        `in.(...)` so one round-trip covers N images."""
+        `in.(...)` so one round-trip covers N images.
+
+        PostgREST / Supabase ships a default `PGRST_DB_MAX_ROWS=1000`
+        cap on many deployments, so a single-page fetch can silently
+        drop older rows for queries with many matches (e.g. several
+        pipeline reruns across 100+ images).  Walk `Range` headers
+        until we observe fewer-than-page-size rows or hit `max_rows`.
+        """
         params: dict[str, str] = {"select": "*", "order": order}
         if image_ids:
             params["image_id"] = "in.(" + ",".join(image_ids) + ")"
@@ -168,9 +177,25 @@ class SupabaseAuthedClient:
             params["kind"] = f"eq.{kind}"
         if status:
             params["status"] = f"eq.{status}"
-        response = await self._request("GET", "/rest/v1/analyses", params=params)
-        rows: list[dict[str, Any]] = response.json()
-        return rows
+
+        all_rows: list[dict[str, Any]] = []
+        offset = 0
+        while offset < max_rows:
+            headers = {
+                "Range-Unit": "items",
+                "Range": f"{offset}-{offset + page_size - 1}",
+            }
+            response = await self._request(
+                "GET", "/rest/v1/analyses", params=params, headers=headers
+            )
+            page: list[dict[str, Any]] = response.json()
+            if not page:
+                break
+            all_rows.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+        return all_rows
 
     async def latest_analysis_for(
         self,

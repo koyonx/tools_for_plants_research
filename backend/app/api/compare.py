@@ -21,6 +21,7 @@ when new pipelines land; the frontend reads it via
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Annotated, Any
 
@@ -31,6 +32,12 @@ from app.core.supabase_http import SupabaseAuthedClient, SupabaseHttpError
 from app.pipeline.stats import compare
 
 router = APIRouter()
+
+# Raw per-value arrays ride in the response so the frontend can draw
+# boxplots without another round-trip.  Cap at 2000 per group to keep
+# the payload bounded when a user compares large cohorts — summary
+# stats are still computed on the full array before truncation.
+MAX_RAW_VALUES_PER_GROUP = 2000
 
 
 @dataclass(frozen=True)
@@ -161,9 +168,20 @@ def _extract(value: Any, path: tuple[str, ...]) -> float | None:
 
 
 def _is_finite(v: float) -> bool:
-    import math
-
     return math.isfinite(v)
+
+
+def _truncate_for_payload(values: list[float]) -> tuple[list[float], bool]:
+    """Cap raw values to MAX_RAW_VALUES_PER_GROUP via stride sampling.
+
+    Summary stats are computed on the full array BEFORE this call, so
+    truncation only affects the jittered scatter overlay the frontend
+    draws on top of the boxplot — it doesn't bias mean/median/p-values.
+    """
+    if len(values) <= MAX_RAW_VALUES_PER_GROUP:
+        return values, False
+    stride = max(1, len(values) // MAX_RAW_VALUES_PER_GROUP)
+    return values[::stride][:MAX_RAW_VALUES_PER_GROUP], True
 
 
 @router.get("/compare/metrics")
@@ -245,17 +263,21 @@ async def run_compare(
             b_image_ids.append(img["id"])
 
         result = compare(a_values, b_values, bootstrap_iters=payload.bootstrap_iters)
+        a_values_out, a_truncated = _truncate_for_payload(a_values)
+        b_values_out, b_truncated = _truncate_for_payload(b_values)
         metric_results.append(
             {
                 "metric": m.to_dict(),
                 "group_a": {
                     "image_ids": a_image_ids,
-                    "values": a_values,
+                    "values": a_values_out,
+                    "values_truncated": a_truncated,
                     **result.group_a.to_dict(),
                 },
                 "group_b": {
                     "image_ids": b_image_ids,
-                    "values": b_values,
+                    "values": b_values_out,
+                    "values_truncated": b_truncated,
                     **result.group_b.to_dict(),
                 },
                 "tests": {
