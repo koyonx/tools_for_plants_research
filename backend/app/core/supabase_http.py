@@ -128,19 +128,42 @@ class SupabaseAuthedClient:
         return rows[0] if rows else None
 
     async def list_images_filtered(
-        self, filters: dict[str, str] | None = None
+        self,
+        filters: dict[str, str] | None = None,
+        *,
+        page_size: int = 1000,
+        max_rows: int = 20_000,
     ) -> list[dict[str, Any]]:
         """RLS-filtered image list with optional column = value filters.
 
-        `filters` keys are column names, values become eq.<value>.  Useful
-        for the batch-selector UI (e.g. {"photosynthesis_type": "C4"}).
+        `filters` keys are column names, values become eq.<value>.  Used
+        by both the batch-selector UI and the compare endpoint — the
+        latter means large C3 vs C4 cohorts can exceed PostgREST's
+        default 1000-row cap, so walk `Range` headers until we see a
+        short page or hit max_rows.
         """
         params: dict[str, str] = {"select": "*", "order": "created_at.desc"}
         for col, val in (filters or {}).items():
             params[col] = f"eq.{val}"
-        response = await self._request("GET", "/rest/v1/images", params=params)
-        rows: list[dict[str, Any]] = response.json()
-        return rows
+
+        all_rows: list[dict[str, Any]] = []
+        offset = 0
+        while offset < max_rows:
+            headers = {
+                "Range-Unit": "items",
+                "Range": f"{offset}-{offset + page_size - 1}",
+            }
+            response = await self._request(
+                "GET", "/rest/v1/images", params=params, headers=headers
+            )
+            page: list[dict[str, Any]] = response.json()
+            if not page:
+                break
+            all_rows.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+        return all_rows
 
     async def get_analysis(self, analysis_id: str) -> dict[str, Any] | None:
         response = await self._request(
