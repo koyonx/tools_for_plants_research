@@ -45,17 +45,26 @@ def _resolve_model_dir(override: str | None) -> str:
     return override or DEFAULT_MODEL_DIR
 
 
+def _checkpoint_is_usable(path: str) -> bool:
+    """True iff `path` contains everything SegformerForSemanticSegmentation
+    needs to load: a config + at least one weights file.  Keeps the probe
+    and the POST validation in lock-step so the UI never queues a run
+    that's doomed to fail in the background task."""
+    p = Path(path)
+    if not p.exists():
+        return False
+    if not (p / "config.json").exists():
+        return False
+    return any((p / name).exists() for name in ("model.safetensors", "pytorch_model.bin"))
+
+
 @router.get("/analyze/segformer/status")
 def segformer_status() -> dict[str, Any]:
     """Quick probe for the frontend — reports whether a checkpoint is present."""
     path = _resolve_model_dir(None)
-    has_weights = any(
-        (Path(path) / name).exists()
-        for name in ("model.safetensors", "pytorch_model.bin")
-    )
     return {
         "model_dir": path,
-        "available": Path(path).exists() and has_weights,
+        "available": _checkpoint_is_usable(path),
     }
 
 
@@ -70,11 +79,12 @@ async def kick_off_segformer(
     sb = SupabaseAuthedClient(jwt)
 
     model_dir = _resolve_model_dir(payload.model_dir)
-    if not Path(model_dir).exists():
+    if not _checkpoint_is_usable(model_dir):
         raise HTTPException(
             status_code=503,
             detail=(
-                f"segformer checkpoint not found at {model_dir}. "
+                f"segformer checkpoint not usable at {model_dir}. "
+                "Expected config.json plus model.safetensors or pytorch_model.bin. "
                 "See models/README.md for how to train + drop-in weights."
             ),
         )
