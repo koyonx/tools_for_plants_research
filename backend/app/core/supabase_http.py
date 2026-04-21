@@ -98,6 +98,50 @@ class SupabaseAuthedClient:
         )
         return cast(dict[str, Any], response.json()[0])
 
+    # ---- batch_runs -----------------------------------------------------
+    async def insert_batch_run(self, row: dict[str, Any]) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            "/rest/v1/batch_runs",
+            headers={"Prefer": "return=representation", "Content-Type": "application/json"},
+            json=row,
+        )
+        return cast(dict[str, Any], response.json()[0])
+
+    async def update_batch_run(self, batch_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        response = await self._request(
+            "PATCH",
+            "/rest/v1/batch_runs",
+            params={"id": f"eq.{batch_id}"},
+            headers={"Prefer": "return=representation", "Content-Type": "application/json"},
+            json=patch,
+        )
+        return cast(dict[str, Any], response.json()[0])
+
+    async def get_batch_run(self, batch_id: str) -> dict[str, Any] | None:
+        response = await self._request(
+            "GET",
+            "/rest/v1/batch_runs",
+            params={"id": f"eq.{batch_id}", "select": "*"},
+        )
+        rows: list[dict[str, Any]] = response.json()
+        return rows[0] if rows else None
+
+    async def list_images_filtered(
+        self, filters: dict[str, str] | None = None
+    ) -> list[dict[str, Any]]:
+        """RLS-filtered image list with optional column = value filters.
+
+        `filters` keys are column names, values become eq.<value>.  Useful
+        for the batch-selector UI (e.g. {"photosynthesis_type": "C4"}).
+        """
+        params: dict[str, str] = {"select": "*", "order": "created_at.desc"}
+        for col, val in (filters or {}).items():
+            params[col] = f"eq.{val}"
+        response = await self._request("GET", "/rest/v1/images", params=params)
+        rows: list[dict[str, Any]] = response.json()
+        return rows
+
     async def get_analysis(self, analysis_id: str) -> dict[str, Any] | None:
         response = await self._request(
             "GET",
@@ -132,6 +176,17 @@ class SupabaseAuthedClient:
         response = await self._request("GET", "/rest/v1/analyses", params=params)
         rows: list[dict[str, Any]] = response.json()
         return rows[0] if rows else None
+
+    # ---- Auth -----------------------------------------------------------
+    async def get_user_identity(self) -> dict[str, Any] | None:
+        """Resolve the caller's auth.users row via GoTrue's `/user` endpoint.
+
+        Returns the user payload (id, email, ...) or `None` if the JWT is
+        anonymous / service-role with no user context.
+        """
+        response = await self._request("GET", "/auth/v1/user")
+        body = response.json()
+        return body if isinstance(body, dict) and body.get("id") else None
 
     # ---- Storage --------------------------------------------------------
     async def download_image_bytes(self, storage_path: str) -> bytes:

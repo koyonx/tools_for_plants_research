@@ -97,7 +97,14 @@ open http://localhost:3001                    # Supabase Studio
 | #5b | Cellpose で細胞検出 | ✅ |
 | #5c | SegFormer 推論 + 訓練ノートブック | ✅ |
 | #6 | 最短経路 + 透水マップ | ✅ |
-| #7 | 精度検証 + リリース整備（本PR） | 🔨 |
+| #7 | 精度検証 + リリース整備 | ✅ |
+| #8 | 研究メタデータ + バッチ解析（本PR） | 🔨 |
+| #9 | 統計比較ダッシュボード | ⏳ |
+| #10 | CO2 固有形態パラメータ（S_mes/S、葉緑体検出） | ⏳ |
+| #11 | ガス交換データ取り込み（LI-COR） | ⏳ |
+| #12 | Darcy 流 PDE ソルバ | ⏳ |
+| #13 | CO2 拡散 PDE ソルバ | ⏳ |
+| #14 | 文献モデル照合 + 論文用エクスポート | ⏳ |
 
 ## 機能
 
@@ -150,6 +157,23 @@ open http://localhost:3001                    # Supabase Studio
 - 各シンクから FMM 場の勾配降下で polyline を辿る、source 未到達時は Euclidean 最近接に snap（UI で破線表示）
 - UI: マグマヒートマップを `mix-blend-screen` で重ね描画 + polyline + 各種統計
 - live SegFormer-availability probe（mount + on focus + 10s poll、viewer は probe なし）
+
+## 研究メタデータ + バッチ解析（PR #8）
+
+C3/C4 比較研究向けの土台。画像ごとに `species` / `photosynthesis_type` / `plant_id` / `treatment` を付与して、任意のサブセットを選んで複数パイプラインを一括実行できる。
+
+- **DB 拡張**（idempotent bootstrap で既存デプロイも自動反映）:
+  - `images` に `species` / `photosynthesis_type` (C3/C4/CAM/unknown CHECK) / `plant_id` / `treatment` / `captured_at` 列を追加
+  - `batch_runs` テーブル新設（ownership RLS、`pipeline_kinds` / `image_ids` / `status` / `total` / `succeeded` / `failed` / `analysis_ids`）
+- **UI**:
+  - 画像詳細ページ: inline metadata editor（フォーカスを外すと保存）
+  - `/dashboard`: 画像グリッドに species/C3-C4/plant_id/treatment フィルタ、multi-select、パイプライン選択、バッチ kickoff ボタン
+  - `/dashboard/batches`: バッチ履歴一覧
+  - `/dashboard/batches/[id]`: 進捗 polling（terminal-gated）+ per-image リンク
+- **Backend**: `POST /batches` で `image × pipeline` マトリクスを BackgroundTask で順次実行、CPU-bound は `asyncio.to_thread`、依存（water_path → segformer_tissue）は呼び出し順で解決
+- **将来の B/C 移行設計**:
+  - B（自動レポート）: `batch_runs` を入力に markdown/PDF 生成する純関数を `backend/app/reports/` に後付け
+  - C（比較ダッシュボード）: PR #9 で `batch_runs + analyses` から直接 group 比較をレンダリング
 
 ## 精度検証（PR #7）
 

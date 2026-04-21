@@ -1,5 +1,6 @@
 import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { CellposePanel } from "@/components/CellposePanel";
+import { ImageMetadataEditor } from "@/components/ImageMetadataEditor";
 import { ImageViewer } from "@/components/ImageViewer";
 import { SegFormerPanel } from "@/components/SegFormerPanel";
 import { WaterPathPanel } from "@/components/WaterPathPanel";
@@ -133,6 +134,7 @@ export default async function ImageDetailPage({
         </p>
       )}
 
+      <ImageMetadataEditor image={image} canEdit={isOwner} />
       <AnalyzePanel imageId={image.id} initial={latestAnalysis ?? null} canRun={isOwner} />
       {signed?.signedUrl && (
         <CellposePanel
