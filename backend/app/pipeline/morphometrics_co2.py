@@ -524,25 +524,32 @@ def compute_co2_morphometrics(
     cells_in_meso_mask_ds = cv2.bitwise_and(cells_in_meso_mask_ds, mesophyll_mask)
     cell_union_area_ds_px = float((cells_in_meso_mask_ds > 0).sum())
 
-    # Cell-surface boundary pixels that face the IAS.  A cell boundary
-    # pixel is "IAS-exposed" iff at least one of its 4-neighbours is in
-    # the IAS mask (mesophyll ∧ ¬cells).  We compute it via a 1-px
-    # dilation of the IAS mask ∩ the cell-union boundary, which is the
-    # standard raster-adjacency trick.  This is the 2D analogue of the
-    # Evans / Tosens "mesophyll surface exposed to intercellular air
-    # space".  Shared cell-cell walls, mesophyll-epidermis boundaries,
-    # and edges butting up against bundle sheath / vascular tissue are
-    # NOT counted — they can't exchange gas.
+    # Cell-surface boundary pixels that face the IAS.  A cell pixel is
+    # "IAS-exposed" iff at least one of its 4-neighbours belongs to
+    # the IAS mask (mesophyll ∧ ¬cells).  Compute this with a ONE-sided
+    # raster-adjacency test:
+    #
+    #     exposed_boundary = cells_in_meso_mask ∧ dilate(ias_mask)
+    #
+    # That gives exactly the 1-pixel inner ring of each cell on the
+    # side that touches IAS.  The naive `MORPH_GRADIENT ∩ dilate(IAS)`
+    # form is two-sided (inner + outer ring) and double-counts the
+    # boundary by ~2x for fully-IAS-surrounded cells — the old test
+    # assertion happened to match the doubled value because the test
+    # cell only faced IAS on two of its four sides, so the doubling
+    # cancelled the missing sides.  Fixed in round-2.
+    #
+    # This matches the 2D analogue of Evans / Tosens "mesophyll
+    # surface exposed to intercellular air space".  Shared cell-cell
+    # walls, mesophyll-epidermis boundaries, and edges butting up
+    # against bundle sheath / vascular tissue are NOT counted —
+    # they can't exchange gas.
     ias_mask = cv2.bitwise_and(
         mesophyll_mask, cv2.bitwise_not(cells_in_meso_mask_ds)
     )
-    # Cell-union boundary via a morphological gradient (1-px outer ring).
     kernel3 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    cell_boundary_ds = cv2.morphologyEx(
-        cells_in_meso_mask_ds, cv2.MORPH_GRADIENT, kernel3
-    )
     ias_dilated = cv2.dilate(ias_mask, kernel3)
-    exposed_boundary_ds = cv2.bitwise_and(cell_boundary_ds, ias_dilated)
+    exposed_boundary_ds = cv2.bitwise_and(cells_in_meso_mask_ds, ias_dilated)
     # Each "on" pixel in exposed_boundary_ds contributes one ds-unit
     # of exposed boundary length.  Converting to original-image
     # pixels uses inv_factor (linear), not inv_factor² (area).
@@ -657,9 +664,19 @@ def compute_co2_morphometrics(
     # Raw chloroplast perimeter would count inner-cell outlines that
     # never see the gas phase; this adjacency form only counts
     # chloroplast-lined wall that a CO2 molecule in IAS actually
-    # encounters.  Dilate the chloroplast mask by ~5 px (in ds coords)
-    # to capture chloroplasts pressed up against the wall.
-    chloroplast_near_wall_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    # encounters.
+    #
+    # The "near wall" tolerance is chosen in ORIGINAL-image pixels
+    # (CHLOROPLAST_WALL_REACH_ORIG_PX, ~= 1-2 µm at typical microscope
+    # scales) and converted to a ds-kernel — otherwise a fixed-ds
+    # kernel would let bigger/more-downsampled images reach further in
+    # original-px units, skewing cross-image comparisons.
+    chloroplast_wall_reach_orig_px = 5
+    kernel_radius_ds = max(1, round(chloroplast_wall_reach_orig_px * factor))
+    kernel_side_ds = 2 * kernel_radius_ds + 1
+    chloroplast_near_wall_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (kernel_side_ds, kernel_side_ds)
+    )
     chloroplast_near_boundary = cv2.dilate(chloroplast_mask_ds, chloroplast_near_wall_kernel)
     chloroplast_lined_boundary = cv2.bitwise_and(exposed_boundary_ds, chloroplast_near_boundary)
     l_c_ds_px = float((chloroplast_lined_boundary > 0).sum())

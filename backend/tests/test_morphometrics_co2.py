@@ -97,32 +97,71 @@ def test_empty_mesophyll_yields_null_scalars() -> None:
 
 
 def test_s_mes_s_matches_ias_exposed_boundary_length() -> None:
-    """One 40x40 cell sitting in the middle of a 200x40 mesophyll
-    strip.  All four cell sides face the IAS (mesophyll surrounds
-    the cell on every edge), so the IAS-exposed boundary length ≈
-    cell perimeter = 4 * 40 = 160 px.  Leaf section length = 200 px
-    (major axis of the mesophyll rectangle).  Expected S_mes/S ≈
-    160 / 200 = 0.8.  Allow a wider tolerance than the old raw-
-    perimeter test because the raster boundary length from
-    MORPH_GRADIENT has edge-discretisation jitter.
+    """One 40x40 cell FULLY INTERIOR to an 80x200 mesophyll rectangle.
+    Every one of the cell's four sides is surrounded by IAS, so the
+    IAS-exposed boundary length ≈ cell perimeter = 4 * 40 = 160 px.
+    Leaf section length = 200 px (major axis of the mesophyll
+    rectangle).  Expected S_mes/S ≈ 160 / 200 = 0.8.
+
+    This is the round-2 replacement for the original test: the
+    previous geometry had the cell touching the top/bottom edges of
+    the mesophyll strip, so only left/right sides faced IAS (80 px
+    total), but a two-sided MORPH_GRADIENT bug in the boundary
+    extraction happened to double the count back to 160 and pass the
+    assertion.  Interior geometry + tighter rel tolerance now
+    actually exercises the one-sided adjacency code.
     """
-    h, w = 100, 400
+    h, w = 200, 400
     image = _blank_image(h, w)
-    # Mesophyll strip: x=[100, 300], y=[30, 70] → major axis = 200.
-    seg = _segformer_blob([_mesophyll_polygon_blob(100, 30, 300, 70)], h, w)
+    # Mesophyll rectangle: x=[100, 300], y=[60, 140] → 200x80.  Cell
+    # centered at (200, 100) with half=20 → 40x40 at [180..220] x
+    # [80..120] — no cell pixel touches a mesophyll edge.
+    seg = _segformer_blob([_mesophyll_polygon_blob(100, 60, 300, 140)], h, w)
     cell = {
-        "polygon": _square_polygon(200, 50, 20),  # 40x40 centered at (200, 50)
-        "centroid": [200.0, 50.0],
+        "polygon": _square_polygon(200, 100, 20),
+        "centroid": [200.0, 100.0],
         "area_px": 1600,
     }
     cp = _cellpose_blob([cell])
     res = compute_co2_morphometrics(image, seg, cp, um_per_px=1.0, max_side_px=400)
     assert res.s_mes_s is not None
-    assert res.s_mes_s == pytest.approx(0.8, rel=0.2)
-    # f_ias = 1 - 1600 / (200*40) = 1 - 0.2 = 0.8
+    assert res.s_mes_s == pytest.approx(0.8, rel=0.1)
+    # f_ias = 1 - 1600 / (200*80) = 1 - 0.1 = 0.9
     assert res.f_ias is not None
-    assert res.f_ias == pytest.approx(0.8, rel=0.05)
+    assert res.f_ias == pytest.approx(0.9, rel=0.05)
     assert res.mesophyll_cells.count == 1
+
+
+def test_shared_wall_between_touching_cells_is_not_counted() -> None:
+    """Two cells touching along a shared wall + each also facing IAS
+    on the outer sides.  The IAS-exposed boundary must NOT include
+    the shared wall (that's 2 * 40 = 80 px of wall that cannot
+    exchange gas), so L_mes,IAS ≈ 2 * (4*40) - 2*40 = 240 px, not
+    320.  Asserts the one-sided adjacency form excludes shared walls
+    by construction.
+    """
+    h, w = 200, 400
+    image = _blank_image(h, w)
+    # Mesophyll rectangle 200x120; two 40x40 cells sharing the wall
+    # at x=200, centers at (180, 100) and (220, 100).
+    seg = _segformer_blob([_mesophyll_polygon_blob(100, 40, 300, 160)], h, w)
+    cell_a = {
+        "polygon": _square_polygon(180, 100, 20),  # x=[160..200]
+        "centroid": [180.0, 100.0],
+        "area_px": 1600,
+    }
+    cell_b = {
+        "polygon": _square_polygon(220, 100, 20),  # x=[200..240]
+        "centroid": [220.0, 100.0],
+        "area_px": 1600,
+    }
+    cp = _cellpose_blob([cell_a, cell_b])
+    res = compute_co2_morphometrics(image, seg, cp, um_per_px=1.0, max_side_px=400)
+    assert res.s_mes_s is not None
+    # Total IAS-exposed perimeter = 2*160 px (both cells' perimeters)
+    # minus 2*40 px (the shared wall counted from each side).  So
+    # expected = 240 px over section length 200 px = 1.2.
+    assert res.s_mes_s == pytest.approx(1.2, rel=0.15)
 
 
 def test_f_ias_is_zero_when_cells_fill_mesophyll() -> None:
