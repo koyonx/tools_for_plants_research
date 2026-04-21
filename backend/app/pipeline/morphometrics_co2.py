@@ -114,12 +114,16 @@ class CellWallStats:
     # All thickness figures are in µm when `um_per_px` is supplied; px
     # otherwise.  Reported both since the scale factor is ground-truth
     # only when the operator ran a basic_measurement scale-bar first.
+    # Every numeric field is nullable: when there are no mesophyll-
+    # clipped cells to seed the distance transform, T_cw is undefined
+    # and reported as `None` rather than a misleading zero — else
+    # `/compare` would treat those zeros as real population values.
     t_cw_mean_um: float | None
     t_cw_median_um: float | None
     t_cw_p95_um: float | None
-    t_cw_mean_px: float
-    t_cw_median_px: float
-    t_cw_p95_px: float
+    t_cw_mean_px: float | None
+    t_cw_median_px: float | None
+    t_cw_p95_px: float | None
     gap_pixel_count: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -474,6 +478,12 @@ def compute_co2_morphometrics(
     # a simple multiply by um_per_px.
     cells_in_meso = _cells_inside(cells, mesophyll_mask, factor)
 
+    # Raw-polygon perimeter / area sums are retained only as reporting
+    # aggregates (CellAggregateStats) so operators can see per-cell-
+    # level numbers.  They are NOT used for S_mes/S or f_ias below —
+    # the physically-correct forms work from a rasterised union mask
+    # clipped to the mesophyll polygon, which is what an IAS gas
+    # molecule actually traverses.
     perim_total_px = 0.0
     area_total_px = 0.0
     for c in cells_in_meso:
@@ -503,21 +513,69 @@ def compute_co2_morphometrics(
         mean_area_um2=mean_area_um2,
     )
 
-    # S_mes/S = Σ(cell perimeter) / (leaf section length).  Dimensionless.
-    # Use original-pixel units for both sides so scale cancels even when
-    # um_per_px is None.
-    if section_length_px > 0 and perim_total_px > 0:
-        s_mes_s = perim_total_px / section_length_px
+    # --- Rasterised masks used for the geometric CO2 metrics -------
+    # Down-sampled cell-union mask of mesophyll cells, clipped to the
+    # mesophyll polygon.  This collapses overlapping Cellpose instance
+    # polygons (which can double-count with polygon-area sums) into a
+    # single footprint, and it excludes fragments that spilled outside
+    # the mesophyll region.  Every downstream CO2 metric operates on
+    # this mask rather than the raw polygon list.
+    cells_in_meso_mask_ds = _render_cells_mask(cells_in_meso, h, w, factor)
+    cells_in_meso_mask_ds = cv2.bitwise_and(cells_in_meso_mask_ds, mesophyll_mask)
+    cell_union_area_ds_px = float((cells_in_meso_mask_ds > 0).sum())
+
+    # Cell-surface boundary pixels that face the IAS.  A cell boundary
+    # pixel is "IAS-exposed" iff at least one of its 4-neighbours is in
+    # the IAS mask (mesophyll ∧ ¬cells).  We compute it via a 1-px
+    # dilation of the IAS mask ∩ the cell-union boundary, which is the
+    # standard raster-adjacency trick.  This is the 2D analogue of the
+    # Evans / Tosens "mesophyll surface exposed to intercellular air
+    # space".  Shared cell-cell walls, mesophyll-epidermis boundaries,
+    # and edges butting up against bundle sheath / vascular tissue are
+    # NOT counted — they can't exchange gas.
+    ias_mask = cv2.bitwise_and(
+        mesophyll_mask, cv2.bitwise_not(cells_in_meso_mask_ds)
+    )
+    # Cell-union boundary via a morphological gradient (1-px outer ring).
+    kernel3 = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    cell_boundary_ds = cv2.morphologyEx(
+        cells_in_meso_mask_ds, cv2.MORPH_GRADIENT, kernel3
+    )
+    ias_dilated = cv2.dilate(ias_mask, kernel3)
+    exposed_boundary_ds = cv2.bitwise_and(cell_boundary_ds, ias_dilated)
+    # Each "on" pixel in exposed_boundary_ds contributes one ds-unit
+    # of exposed boundary length.  Converting to original-image
+    # pixels uses inv_factor (linear), not inv_factor² (area).
+    l_mes_ias_ds_px = float((exposed_boundary_ds > 0).sum())
+    l_mes_ias_px = l_mes_ias_ds_px * inv_factor
+
+    # S_mes/S = L_mes,IAS / leaf section length.  Dimensionless; uses
+    # the same down-sampled → original-px conversion on both sides so
+    # the factor cancels out.  The original "Σ cell perimeter / section
+    # length" proxy over-counted shared walls; this form matches the
+    # Evans / Tosens definition more closely.
+    if section_length_px > 0 and l_mes_ias_px > 0:
+        s_mes_s = l_mes_ias_px / section_length_px
     else:
         s_mes_s = None
         if mesophyll_area_ds_px > 0 and not cells_in_meso:
             notes.append("no Cellpose cells inside mesophyll — S_mes/S null.")
+        elif mesophyll_area_ds_px > 0 and l_mes_ias_px == 0:
+            notes.append(
+                "cells fill the mesophyll polygon exactly — no IAS-exposed "
+                "boundary detected; S_mes/S null.  Check Cellpose coverage."
+            )
 
-    # f_ias = 1 - Σ(cell area) / (mesophyll area).
-    if mesophyll_area_px > 0 and cells_in_meso:
-        f_ias = max(0.0, 1.0 - (area_total_px / mesophyll_area_px))
-    else:
-        f_ias = None
+    # f_ias = 1 - (cell-union area in mesophyll) / (mesophyll area).
+    # Using the rasterised union instead of sum(polygon_area) avoids
+    # double-counting overlapping Cellpose instances and keeps f_ias
+    # bounded in [0, 1] without a clamp — because the numerator is a
+    # subset of the denominator by construction.
+    f_ias = (
+        1.0 - (cell_union_area_ds_px / mesophyll_area_ds_px)
+        if mesophyll_area_ds_px > 0
+        else None
+    )
 
     # --- Chloroplast detection + S_c/S ------------------------------
     # Run per-cell in the down-sampled LAB image for speed.  Render each
@@ -529,9 +587,6 @@ def compute_co2_morphometrics(
     chloroplast_area_ds_px = 0.0
     chloroplast_perim_ds_px = 0.0
     a_contrasts: list[float] = []
-
-    # Cell mask at down-sampled resolution for DT / overlay / IAS sanity.
-    cells_in_meso_mask_ds = _render_cells_mask(cells_in_meso, h, w, factor)
 
     for c in cells_in_meso:
         polygon = c.get("polygon") or []
@@ -595,9 +650,23 @@ def compute_co2_morphometrics(
         a_channel_contrast=float(np.mean(a_contrasts)) if a_contrasts else 0.0,
     )
 
-    # S_c/S = Σ(chloroplast perimeter) / leaf section length.
-    if section_length_px > 0 and chloroplast_perim_px > 0:
-        s_c_s = chloroplast_perim_px / section_length_px
+    # S_c/S = fraction of the IAS-exposed cell boundary that has a
+    # chloroplast lining it.  The Evans / Tosens 2-D proxy is:
+    #     S_c = length of cell boundary adjacent to BOTH IAS and a
+    #           chloroplast blob.
+    # Raw chloroplast perimeter would count inner-cell outlines that
+    # never see the gas phase; this adjacency form only counts
+    # chloroplast-lined wall that a CO2 molecule in IAS actually
+    # encounters.  Dilate the chloroplast mask by ~5 px (in ds coords)
+    # to capture chloroplasts pressed up against the wall.
+    chloroplast_near_wall_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    chloroplast_near_boundary = cv2.dilate(chloroplast_mask_ds, chloroplast_near_wall_kernel)
+    chloroplast_lined_boundary = cv2.bitwise_and(exposed_boundary_ds, chloroplast_near_boundary)
+    l_c_ds_px = float((chloroplast_lined_boundary > 0).sum())
+    l_c_px = l_c_ds_px * inv_factor
+
+    if section_length_px > 0 and l_c_px > 0:
+        s_c_s = l_c_px / section_length_px
     else:
         s_c_s = None
         if cells_in_meso and chloroplast_count == 0:
@@ -606,52 +675,62 @@ def compute_co2_morphometrics(
                 "Contrast may be insufficient (H&E-style stains) or the "
                 "image lacks green-pigment tissue."
             )
+        elif cells_in_meso and chloroplast_count > 0 and l_c_px == 0:
+            notes.append(
+                "chloroplasts detected but none sit near the IAS-exposed "
+                "cell wall — S_c/S null.  Detector likely found interior "
+                "blobs with no surface contact."
+            )
 
-    # --- Cell-wall thickness via distance transform on the gap -----
-    # Gap = mesophyll_mask AND NOT cells_mask.  DT of the complement of
-    # cells_mask gives, for each gap pixel, distance to the nearest cell
-    # boundary — i.e. the half-width of the gap at that pixel.  Median
-    # is robust against cell-edge ragged pixels; p95 approximates the
-    # typical max half-gap, i.e. one full wall thickness when two cells
-    # share a wall on either side.
-    cells_mask_all = _render_cells_mask(cells, h, w, factor)
-    # With zero cell pixels, distanceTransform on the all-255 inverse
-    # grid returns FLT_MAX / +inf for every pixel (no seed to measure
-    # against).  Those leak into the result blob and break JSON
-    # encoding (Starlette + json.dumps(allow_nan=False) both reject
-    # Infinity).  Short-circuit: when there's nothing to measure
-    # against, T_cw is undefined — report zeros with a note.
-    has_cells_for_dt = bool(cells_mask_all.max() > 0)
+    # --- Cell-wall thickness proxy via gap-region distance transform -
+    # The DT of the cell-union complement gives, at each IAS pixel, the
+    # distance to the nearest *mesophyll* cell boundary — i.e. the
+    # half-width of the gap at that pixel.  Median of those distances
+    # is a stable proxy for "typical wall-to-wall gap / 2" within the
+    # mesophyll.  NOT a substitute for a TEM T_cw measurement, but
+    # consistent across runs and sufficient for between-group C3/C4
+    # comparisons which is the research question.
+    #
+    # Seed on `cells_in_meso_mask_ds` (the mesophyll-clipped cell
+    # union), not on all Cellpose detections — otherwise epidermis or
+    # bundle-sheath cells outside the mesophyll shorten the measured
+    # distances near the tissue edge.
+    has_cells_for_dt = bool(cells_in_meso_mask_ds.max() > 0)
     if has_cells_for_dt:
-        gap_mask = cv2.bitwise_and(mesophyll_mask, cv2.bitwise_not(cells_mask_all))
-        inv_cells = cv2.bitwise_not(cells_mask_all)
+        gap_mask = ias_mask  # same mask used above
+        inv_cells = cv2.bitwise_not(cells_in_meso_mask_ds)
         dt = cv2.distanceTransform(inv_cells, cv2.DIST_L2, 3)
-        # Guard against the occasional inf / NaN bleed on OpenCV builds
-        # that return FLT_MAX on isolated boundary pixels.
+        # Guard against inf / FLT_MAX bleed on OpenCV builds that
+        # emit those values at isolated boundary pixels.
         gap_dt_raw = dt[gap_mask > 0]
         gap_dt = gap_dt_raw[np.isfinite(gap_dt_raw)]
     else:
         gap_dt = np.empty((0,), dtype=np.float32)
         notes.append(
-            "no Cellpose cells available for the distance-transform gap measurement; "
-            "T_cw reported as zero."
+            "no mesophyll-clipped Cellpose cells available for the distance-"
+            "transform gap measurement; T_cw reported as null."
         )
 
     if gap_dt.size > 0:
         # Values are distances in down-sampled pixels.  Convert to
         # original-image px with inv_factor, then µm via um_per_px.
-        t_cw_mean_px = float(gap_dt.mean()) * inv_factor
-        t_cw_median_px = float(np.median(gap_dt)) * inv_factor
-        t_cw_p95_px = float(np.quantile(gap_dt, 0.95)) * inv_factor
+        t_cw_mean_px: float | None = float(gap_dt.mean()) * inv_factor
+        t_cw_median_px: float | None = float(np.median(gap_dt)) * inv_factor
+        t_cw_p95_px: float | None = float(np.quantile(gap_dt, 0.95)) * inv_factor
     else:
-        t_cw_mean_px = 0.0
-        t_cw_median_px = 0.0
-        t_cw_p95_px = 0.0
+        t_cw_mean_px = None
+        t_cw_median_px = None
+        t_cw_p95_px = None
+
+    def _to_um(px: float | None) -> float | None:
+        if px is None or um_per_px is None:
+            return None
+        return px * um_per_px
 
     cell_wall_stats = CellWallStats(
-        t_cw_mean_um=t_cw_mean_px * um_per_px if um_per_px is not None else None,
-        t_cw_median_um=t_cw_median_px * um_per_px if um_per_px is not None else None,
-        t_cw_p95_um=t_cw_p95_px * um_per_px if um_per_px is not None else None,
+        t_cw_mean_um=_to_um(t_cw_mean_px),
+        t_cw_median_um=_to_um(t_cw_median_px),
+        t_cw_p95_um=_to_um(t_cw_p95_px),
         t_cw_mean_px=t_cw_mean_px,
         t_cw_median_px=t_cw_median_px,
         t_cw_p95_px=t_cw_p95_px,

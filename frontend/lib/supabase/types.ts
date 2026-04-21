@@ -228,9 +228,12 @@ export type Co2CellWallStats = {
   t_cw_mean_um: number | null;
   t_cw_median_um: number | null;
   t_cw_p95_um: number | null;
-  t_cw_mean_px: number;
-  t_cw_median_px: number;
-  t_cw_p95_px: number;
+  // px fields are null when there are no mesophyll-clipped cells to
+  // seed the distance transform — otherwise zero-values would be
+  // picked up as real datapoints by the comparison dashboard.
+  t_cw_mean_px: number | null;
+  t_cw_median_px: number | null;
+  t_cw_p95_px: number | null;
   gap_pixel_count: number;
 };
 

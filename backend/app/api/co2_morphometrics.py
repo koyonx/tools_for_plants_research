@@ -5,6 +5,11 @@ the same image.  Runs the pixel-level morphometrics computation in a
 background task (CPU-bound classical CV), upserts the `analyses` row
 with `kind='co2_morphometrics'`, and returns the analysis id so the
 frontend can poll `GET /analyses/{id}`.
+
+Prereq readiness is probed by the panel directly against Supabase
+(same pattern as `WaterPathPanel`) rather than via a dedicated status
+endpoint here — the panel needs a live subscription anyway so a
+server round-trip would just add latency.
 """
 
 from __future__ import annotations
@@ -50,38 +55,6 @@ def _scale_from(image: dict[str, Any], basic_row: dict[str, Any] | None) -> floa
         if isinstance(s, int | float) and s > 0:
             return float(s)
     return None
-
-
-@router.get("/analyze/co2-morphometrics/status")
-async def co2_morphometrics_status(
-    image_id: str | None = None,
-    authorization: Annotated[str | None, Header()] = None,
-) -> dict[str, Any]:
-    """Readiness probe for the CO2 morphometrics panel.
-
-    When called without `image_id`: returns static info — the endpoint
-    has no external model dependency, so `available` is always True
-    here.  When called with `image_id`: checks whether both upstream
-    prerequisites (`segformer_tissue`, `cellpose_cells`) have a `done`
-    row, so the UI can disable the kickoff button with a clear reason.
-    """
-    info: dict[str, Any] = {
-        "available": True,
-        "requires": [SEGFORMER_KIND, CELLPOSE_KIND],
-    }
-    if image_id is None:
-        return info
-
-    sb = SupabaseAuthedClient(_extract_jwt(authorization))
-    try:
-        seg = await sb.latest_analysis_for(image_id, SEGFORMER_KIND, status="done")
-        cells = await sb.latest_analysis_for(image_id, CELLPOSE_KIND, status="done")
-    except SupabaseHttpError as e:
-        raise HTTPException(status_code=e.status, detail=e.detail) from e
-    info["segformer_ready"] = seg is not None
-    info["cellpose_ready"] = cells is not None
-    info["ready"] = bool(seg) and bool(cells)
-    return info
 
 
 @router.post("/images/{image_id}/analyze/co2-morphometrics")

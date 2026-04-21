@@ -96,11 +96,15 @@ def test_empty_mesophyll_yields_null_scalars() -> None:
     json.dumps(d, allow_nan=False)
 
 
-def test_s_mes_s_matches_known_perimeter_over_length_ratio() -> None:
-    """One 40x40 cell inside a 200-wide mesophyll strip.
-    Perimeter = 4 * 40 = 160 px; leaf section length = 200 px (width
-    of the mesophyll rectangle, since width > height → major axis);
-    expected S_mes/S ≈ 160 / 200 = 0.8.
+def test_s_mes_s_matches_ias_exposed_boundary_length() -> None:
+    """One 40x40 cell sitting in the middle of a 200x40 mesophyll
+    strip.  All four cell sides face the IAS (mesophyll surrounds
+    the cell on every edge), so the IAS-exposed boundary length ≈
+    cell perimeter = 4 * 40 = 160 px.  Leaf section length = 200 px
+    (major axis of the mesophyll rectangle).  Expected S_mes/S ≈
+    160 / 200 = 0.8.  Allow a wider tolerance than the old raw-
+    perimeter test because the raster boundary length from
+    MORPH_GRADIENT has edge-discretisation jitter.
     """
     h, w = 100, 400
     image = _blank_image(h, w)
@@ -114,7 +118,7 @@ def test_s_mes_s_matches_known_perimeter_over_length_ratio() -> None:
     cp = _cellpose_blob([cell])
     res = compute_co2_morphometrics(image, seg, cp, um_per_px=1.0, max_side_px=400)
     assert res.s_mes_s is not None
-    assert res.s_mes_s == pytest.approx(0.8, rel=0.05)
+    assert res.s_mes_s == pytest.approx(0.8, rel=0.2)
     # f_ias = 1 - 1600 / (200*40) = 1 - 0.2 = 0.8
     assert res.f_ias is not None
     assert res.f_ias == pytest.approx(0.8, rel=0.05)
@@ -190,18 +194,23 @@ def test_um_per_px_scales_linear_quantities() -> None:
 
 
 def test_chloroplast_detection_finds_green_spots_inside_cells() -> None:
-    """A cell painted beige with two bright-green blobs should yield
-    chloroplast_count >= 2 via the LAB a* Otsu path."""
+    """A cell painted beige with two bright-green blobs pressed against
+    the cell wall (where real chloroplasts line up in mesophyll tissue).
+    Expect chloroplast_count >= 2 via the LAB a* Otsu path, and S_c/S
+    positive because the blobs sit adjacent to the IAS-facing cell
+    wall — per the Evans / Tosens convention, S_c is chloroplast
+    surface actually exposed to the gas phase, not interior blobs.
+    """
     h, w = 200, 400
     # Beige background within mesophyll
     image = _blank_image(h, w, colour=(170, 195, 215))
     seg = _segformer_blob([_mesophyll_polygon_blob(100, 50, 300, 150)], h, w)
     # Paint a cell rectangle lighter, then place two dark-green blobs
-    # inside it.  In LAB, green pigment has strongly negative a*, so
-    # Otsu on a* picks them up even at modest image resolution.
+    # near its boundary (~5 px from the edge) — simulating mesophyll
+    # chloroplasts that press against the cell wall in vivo.
     cv2.rectangle(image, (150, 70), (250, 130), (180, 210, 225), thickness=-1)
-    cv2.circle(image, (175, 95), 8, (10, 110, 10), thickness=-1)  # green
-    cv2.circle(image, (220, 110), 7, (10, 110, 10), thickness=-1)  # green
+    cv2.circle(image, (175, 75), 6, (10, 110, 10), thickness=-1)  # top-edge
+    cv2.circle(image, (245, 110), 6, (10, 110, 10), thickness=-1)  # right-edge
     cell = {
         "polygon": [
             [150.0, 70.0],
@@ -219,9 +228,39 @@ def test_chloroplast_detection_finds_green_spots_inside_cells() -> None:
     assert res.chloroplasts.count >= 2
     # Overlay render produces a non-empty PNG payload.
     assert len(res.chloroplast_overlay_png_base64) > 0
-    # S_c/S should be positive when chloroplasts are detected.
+    # S_c/S should be positive when chloroplasts sit along the wall.
     assert res.s_c_s is not None
     assert res.s_c_s > 0
+
+
+def test_interior_chloroplasts_do_not_count_toward_s_c_s() -> None:
+    """A green blob well away from the cell wall must not be counted
+    toward S_c/S — chloroplasts that don't face IAS can't exchange gas.
+    The count is still positive (the detector saw them), but the
+    IAS-adjacent boundary length stays zero so the ratio is null.
+    """
+    h, w = 200, 400
+    image = _blank_image(h, w, colour=(170, 195, 215))
+    seg = _segformer_blob([_mesophyll_polygon_blob(100, 50, 300, 150)], h, w)
+    cv2.rectangle(image, (150, 70), (250, 130), (180, 210, 225), thickness=-1)
+    # Center-of-cell only — 25+ px from every cell wall.
+    cv2.circle(image, (200, 100), 5, (10, 110, 10), thickness=-1)
+    cell = {
+        "polygon": [
+            [150.0, 70.0],
+            [250.0, 70.0],
+            [250.0, 130.0],
+            [150.0, 130.0],
+        ],
+        "centroid": [200.0, 100.0],
+        "area_px": 6000,
+    }
+    cp = _cellpose_blob([cell])
+    res = compute_co2_morphometrics(
+        image, seg, cp, um_per_px=1.0, max_side_px=400, chloroplast_min_area_px=4
+    )
+    assert res.chloroplasts.count >= 1
+    assert res.s_c_s is None
 
 
 def test_low_contrast_skips_chloroplast_detection() -> None:
