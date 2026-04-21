@@ -44,6 +44,12 @@ export function WaterPathPanel({
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    // Read-only viewers can't run anything anyway; once a SegFormer
+    // result is visible to them, repolling adds no value — skip the
+    // setInterval to keep load off the REST gateway when many people
+    // share a popular image tab.
+    if (!canRun && segReady) return;
+
     let cancelled = false;
     const probe = async () => {
       const { data } = await supabase
@@ -61,14 +67,15 @@ export function WaterPathPanel({
     const onFocus = () => void probe();
     window.addEventListener("focus", onFocus);
     // Light periodic refresh — SegFormer usually finishes in <1 min, so
-    // poll every 10s while the user has the page open.
-    const interval = setInterval(probe, 10_000);
+    // poll every 10s while the owner has the page open and could trigger
+    // a run.  Read-only viewers exit above.
+    const interval = canRun ? setInterval(probe, 10_000) : null;
     return () => {
       cancelled = true;
       window.removeEventListener("focus", onFocus);
-      clearInterval(interval);
+      if (interval !== null) clearInterval(interval);
     };
-  }, [supabase, imageId]);
+  }, [supabase, imageId, canRun, segReady]);
 
   const clearPollRef = useRef<(() => void) | null>(null);
   if (clearPollRef.current === null) {
@@ -223,6 +230,17 @@ export function WaterPathPanel({
             height={imageHeight}
             result={result}
           />
+          {(() => {
+            const params = analysis?.parameters as { source_segformer_id?: string } | null;
+            const sid = params?.source_segformer_id;
+            return sid ? (
+              <p className="text-xs text-neutral-500">
+                参照した SegFormer 結果: <code className="font-mono">{sid.slice(0, 8)}</code>
+                {analysis?.created_at &&
+                  ` · ${new Date(analysis.created_at).toLocaleString("ja-JP")}`}
+              </p>
+            ) : null;
+          })()}
         </div>
       )}
     </section>
@@ -276,18 +294,41 @@ function WaterPathOverlay({
         {result.paths.map((p, i) => {
           // Prefer the gradient-descent polyline; fall back to a
           // straight line for legacy result rows that lack `route`.
-          const points =
-            p.route && p.route.length >= 2
-              ? p.route.map(([x, y]) => `${x},${y}`).join(" ")
-              : `${p.centroid[0]},${p.centroid[1]} ${p.nearest_source[0]},${p.nearest_source[1]}`;
+          const route = p.route && p.route.length >= 2 ? p.route : null;
+          const truncated = Boolean(p.truncated);
+          // When truncated, the FINAL segment was an Euclidean snap and
+          // may cross high-cost tissue.  Render it dashed and the
+          // preceding gradient-traced part solid so the user sees the
+          // distinction.
+          let solidPoints: string;
+          let dashedPoints: string | null = null;
+          if (route && truncated && route.length >= 2) {
+            const head = route.slice(0, -1);
+            const tail = [route[route.length - 2], route[route.length - 1]];
+            solidPoints = head.map(([x, y]) => `${x},${y}`).join(" ");
+            dashedPoints = tail.map(([x, y]) => `${x},${y}`).join(" ");
+          } else if (route) {
+            solidPoints = route.map(([x, y]) => `${x},${y}`).join(" ");
+          } else {
+            solidPoints = `${p.centroid[0]},${p.centroid[1]} ${p.nearest_source[0]},${p.nearest_source[1]}`;
+          }
           return (
             <g key={`p${i}-${p.centroid[0].toFixed(1)}`}>
               <polyline
-                points={points}
+                points={solidPoints}
                 fill="none"
                 stroke="rgba(56, 189, 248, 0.9)"
                 strokeWidth={strokePx}
               />
+              {dashedPoints && (
+                <polyline
+                  points={dashedPoints}
+                  fill="none"
+                  stroke="rgba(56, 189, 248, 0.7)"
+                  strokeWidth={strokePx}
+                  strokeDasharray={`${strokePx * 4} ${strokePx * 3}`}
+                />
+              )}
               <circle
                 cx={p.nearest_source[0]}
                 cy={p.nearest_source[1]}

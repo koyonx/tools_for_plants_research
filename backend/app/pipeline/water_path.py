@@ -68,6 +68,11 @@ class StomatumPath:
     # `[centroid, nearest_source]`; for tissue maps with detours this
     # carries the actual minimum-resistance route.
     route: list[list[float]] = field(default_factory=list)
+    # True when the gradient trace plateaued / hit the step budget and
+    # the final segment was snapped to the Euclidean-nearest source
+    # pixel (which may cross high-cost barriers).  UI dashes that
+    # segment so users don't read the snap as a real route.
+    truncated: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -104,7 +109,9 @@ def _rasterise_class(
     scale: float,
 ) -> np.ndarray:
     """Return a uint8 mask (255 / 0) of every polygon whose class_key
-    matches `target_class`.  Out-of-image vertices are clipped."""
+    matches `target_class`.  Out-of-image vertices are clipped.  Polygon
+    `holes` (PR #5c) are punched back out so a bundle-sheath ring around
+    xylem doesn't cover the inner xylem in the cost field."""
     mask = np.zeros((height, width), dtype=np.uint8)
     for poly in polygons:
         if poly.get("class_key") != target_class:
@@ -118,11 +125,29 @@ def _rasterise_class(
         pts[:, 0] = np.clip(pts[:, 0], 0, width - 1)
         pts[:, 1] = np.clip(pts[:, 1], 0, height - 1)
         cv2.fillPoly(mask, [pts.reshape(-1, 1, 2)], color=(255,))
+        # Punch holes back out so this class doesn't claim pixels that
+        # actually belong to the enclosed class.
+        for hole in poly.get("holes") or []:
+            if not isinstance(hole, list) or len(hole) < 3:
+                continue
+            hpts = _scale_polygon(hole, scale)
+            if hpts.ndim != 2 or hpts.shape[1] != 2:
+                continue
+            hpts[:, 0] = np.clip(hpts[:, 0], 0, width - 1)
+            hpts[:, 1] = np.clip(hpts[:, 1], 0, height - 1)
+            cv2.fillPoly(mask, [hpts.reshape(-1, 1, 2)], color=(0,))
     return mask
 
 
-def _heatmap_to_png_base64(values: np.ndarray) -> str:
-    """Render a finite ndarray to a base64-encoded magma-style PNG."""
+def _heatmap_to_png_base64(values: np.ndarray, alpha_mask: np.ndarray | None = None) -> str:
+    """Render a finite ndarray to a base64-encoded magma-style PNG.
+
+    `alpha_mask` (uint8 or bool, same shape as `values`): pixels where
+    this is zero get alpha=0 in the output PNG.  When omitted, alpha
+    follows the finiteness of `values` — fine for fields that are
+    truly infinite outside the leaf, but use the explicit mask when
+    FMM happens to produce finite numbers across BACKGROUND_COST
+    regions (which it does once `dx` rescaling is applied)."""
     finite = np.isfinite(values)
     if not finite.any():
         return ""
@@ -154,8 +179,10 @@ def _heatmap_to_png_base64(values: np.ndarray) -> str:
     rgb = stops[lo] * (1 - t) + stops[hi] * t
     rgba = np.zeros((*values.shape, 4), dtype=np.uint8)
     rgba[..., :3] = np.clip(rgb, 0, 255).astype(np.uint8)
-    # Alpha 0 outside finite region so the original image shows through
-    rgba[..., 3] = np.where(finite, 200, 0).astype(np.uint8)
+    if alpha_mask is None:
+        rgba[..., 3] = np.where(finite, 200, 0).astype(np.uint8)
+    else:
+        rgba[..., 3] = np.where((alpha_mask > 0) & finite, 200, 0).astype(np.uint8)
     # cv2 expects BGRA for PNG encoding
     bgra = rgba[..., [2, 1, 0, 3]]
     ok, buf = cv2.imencode(".png", bgra)
@@ -202,26 +229,47 @@ def compute_water_path(
     w = max(int(w_orig * factor), 1)
     inv_factor = 1.0 / factor
 
-    resistance: dict[str, float] = {**DEFAULT_RESISTANCE, **(resistance_override or {})}
+    # Sanitise the user-supplied override.  Pydantic accepts NaN / +Inf /
+    # negatives for an unconstrained `dict[str, float]`, and any of those
+    # in the cost field would either crash skfmm or silently poison the
+    # arrival-time grid.  Keep only finite, strictly-positive values.
+    sanitised_override: dict[str, float] = {}
+    for k, v in (resistance_override or {}).items():
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            continue
+        if fv > 0 and fv < 1e6:
+            sanitised_override[k] = fv
+    resistance: dict[str, float] = {**DEFAULT_RESISTANCE, **sanitised_override}
 
     # Decide source class: prefer vessel-level annotation when present.
     has_vessel = any(p.get("class_key") == "xylem_vessel" for p in polygons)
     source_class = "xylem_vessel" if has_vessel else "xylem"
     source_mask = _rasterise_class(polygons, source_class, h, w, factor)
-    sink_mask = _rasterise_class(polygons, "stomata", h, w, factor)
+    # Stomata mask is used only as a presence guard here — the FMM solve
+    # treats stomata as ordinary pixels with their own class resistance,
+    # and we sample the resulting `travel_time` field at each stomatum
+    # centroid below.  Stomata are NOT terminating boundaries; arrival
+    # times at non-stomata pixels can include routes that pass through
+    # stomata if those happen to lie on the cheapest path.
+    sink_mask_present = _rasterise_class(polygons, "stomata", h, w, factor)
 
     if source_mask.max() == 0:
         raise ValueError(
             "no xylem / xylem_vessel polygons in the SegFormer result; "
             "annotate at least one and re-run SegFormer first"
         )
-    if sink_mask.max() == 0:
+    if sink_mask_present.max() == 0:
         raise ValueError("no stomata polygons in the SegFormer result")
 
     # Build the cost field.  Anywhere covered by a class polygon takes that
     # class's resistance; anywhere else gets BACKGROUND_COST so FMM sees
-    # an effective wall.
+    # an effective wall.  We also accumulate a "leaf coverage" mask out of
+    # the class polygons — used later to alpha-mask the heatmap so the
+    # overlay never tints off-leaf background.
     cost = np.full((h, w), BACKGROUND_COST, dtype=np.float64)
+    leaf_mask = np.zeros((h, w), dtype=np.uint8)
     # Paint classes in CLASS_INDEX order so later classes (vessel, sinks)
     # overwrite broader regions (palisade, spongy) underneath them.
     paint_order = [
@@ -242,6 +290,7 @@ def compute_water_path(
         if cls_mask.max() == 0:
             continue
         cost = np.where(cls_mask > 0, resistance.get(cls_key, BACKGROUND_COST), cost)
+        leaf_mask = np.maximum(leaf_mask, cls_mask)
 
     # Sources are at zero level; everything else is +1.  scikit-fmm computes
     # arrival time by integrating cost (slowness) along the steepest
@@ -325,10 +374,14 @@ def compute_water_path(
         # If the trace bailed before reaching the source mask, snap the
         # endpoint to the Euclidean-nearest source pixel and append it
         # so `route` is always sink → … → source and `nearest_source`
-        # is never the sink itself.
+        # is never the sink itself.  Mark the path `truncated=True` so
+        # the UI can dash that snap segment — it may cross high-cost
+        # tissue and is not a real FMM route.
+        truncated = False
         end_y_int = min(max(round(route_ds[-1][0]), 0), h - 1)
         end_x_int = min(max(round(route_ds[-1][1]), 0), w - 1)
         if source_mask[end_y_int, end_x_int] == 0:
+            truncated = True
             src_pixels = np.argwhere(source_mask > 0)
             if src_pixels.size > 0:
                 diffs = src_pixels.astype(np.float64) - np.array(
@@ -368,6 +421,7 @@ def compute_water_path(
                 straight_line_um=straight_um,
                 nearest_source=nearest_orig,
                 route=route_orig,
+                truncated=truncated,
             )
         )
 
@@ -375,7 +429,7 @@ def compute_water_path(
         raise ValueError("FMM yielded no finite travel times for any stomata")
 
     tts = np.array([p.travel_time for p in paths], dtype=np.float64)
-    heatmap_b64 = _heatmap_to_png_base64(arrival_finite)
+    heatmap_b64 = _heatmap_to_png_base64(arrival_finite, alpha_mask=leaf_mask)
 
     return WaterPathResult(
         source_class=source_class,

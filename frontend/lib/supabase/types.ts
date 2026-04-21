@@ -94,6 +94,10 @@ export type StomatumPath = {
   // coords).  Frontend renders it instead of the straight-line link
   // when present.
   route?: [number, number][];
+  // True when the trace was snapped to the Euclidean-nearest source
+  // because gradient descent plateaued or hit the step budget — UI
+  // dashes that final segment.
+  truncated?: boolean;
 };
 
 export type WaterPathResult = {
