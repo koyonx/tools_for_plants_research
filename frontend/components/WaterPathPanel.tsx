@@ -36,7 +36,39 @@ export function WaterPathPanel({
   const [analysis, setAnalysis] = useState<AnalysisRow | null>(initial ?? null);
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Track SegFormer availability live: the parent passes a server-rendered
+  // snapshot via `hasSegformerResult`, but the user may run SegFormer in
+  // the same page session, so we re-probe Supabase on mount and on focus
+  // to flip the panel state without a manual reload.
+  const [segReady, setSegReady] = useState(hasSegformerResult);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const probe = async () => {
+      const { data } = await supabase
+        .from("analyses")
+        .select("id")
+        .eq("image_id", imageId)
+        .eq("kind", "segformer_tissue")
+        .eq("status", "done")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<{ id: string }>();
+      if (!cancelled) setSegReady(Boolean(data));
+    };
+    void probe();
+    const onFocus = () => void probe();
+    window.addEventListener("focus", onFocus);
+    // Light periodic refresh — SegFormer usually finishes in <1 min, so
+    // poll every 10s while the user has the page open.
+    const interval = setInterval(probe, 10_000);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+      clearInterval(interval);
+    };
+  }, [supabase, imageId]);
 
   const clearPollRef = useRef<(() => void) | null>(null);
   if (clearPollRef.current === null) {
@@ -83,7 +115,7 @@ export function WaterPathPanel({
   }, [initialId, initialStatus, clearPoll]);
 
   const kickOff = async () => {
-    if (!canRun || !hasSegformerResult) return;
+    if (!canRun || !segReady) return;
     setTriggering(true);
     setError(null);
     clearPoll();
@@ -129,7 +161,7 @@ export function WaterPathPanel({
     <section className="space-y-4 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-lg font-semibold">水経路（FMM）</h2>
-        {canRun && hasSegformerResult && (
+        {canRun && segReady && (
           <button
             type="button"
             onClick={kickOff}
@@ -142,14 +174,14 @@ export function WaterPathPanel({
         <span className="text-xs text-neutral-500">scikit-fmm Fast Marching</span>
       </div>
 
-      {!hasSegformerResult && (
+      {!segReady && (
         <p className="rounded bg-neutral-50 p-3 text-xs text-neutral-600 dark:bg-neutral-900 dark:text-neutral-400">
           このパネルは SegFormer の結果から導管・気孔のマスクを取り出して使います。
-          まず上の「SegFormer 組織分割」を実行してください。
+          まず上の「SegFormer 組織分割」を実行してください（完了後この案内は自動的に消えます）。
         </p>
       )}
 
-      {hasSegformerResult && !canRun && (
+      {segReady && !canRun && (
         <p className="rounded bg-neutral-50 p-3 text-xs text-neutral-600 dark:bg-neutral-900 dark:text-neutral-400">
           他ユーザーの画像のため、推論の実行はオーナー本人のみ可能です。過去の結果は閲覧できます。
         </p>

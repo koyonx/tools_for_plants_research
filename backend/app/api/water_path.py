@@ -67,10 +67,12 @@ async def kick_off_water_path(
         raise HTTPException(status_code=404, detail="image not found or not accessible")
 
     try:
-        seg = await sb.latest_analysis_for(image_id, SEGFORMER_KIND)
+        # Filter on status=done so a more-recent failed/pending retry
+        # doesn't permanently mask an earlier usable result.
+        seg = await sb.latest_analysis_for(image_id, SEGFORMER_KIND, status="done")
     except SupabaseHttpError as e:
         raise HTTPException(status_code=e.status, detail=e.detail) from e
-    if seg is None or not isinstance(seg.get("result"), dict) or seg.get("status") != "done":
+    if seg is None or not isinstance(seg.get("result"), dict):
         raise HTTPException(
             status_code=412,
             detail=(
