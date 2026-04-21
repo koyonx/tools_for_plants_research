@@ -1,7 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import analyze, batches, cellpose, health, segformer, training, water_path
+from app.api import (
+    analyze,
+    batches,
+    cellpose,
+    compare,
+    health,
+    segformer,
+    training,
+    water_path,
+)
 from app.core.config import settings
 
 
@@ -27,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(segformer.router, tags=["analyze"])
     app.include_router(water_path.router, tags=["analyze"])
     app.include_router(batches.router, tags=["batches"])
+    app.include_router(compare.router, tags=["compare"])
     app.include_router(training.router, tags=["training"])
     return app
 

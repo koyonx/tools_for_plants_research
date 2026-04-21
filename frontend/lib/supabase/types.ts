@@ -26,6 +26,57 @@ export type ImageRow = {
   updated_at: string;
 };
 
+// PR #9 — comparison dashboard types
+export type CompareMetricDef = {
+  key: string;
+  label: string;
+  unit: string;
+  analysis_kind: string;
+  path: string[];
+};
+
+export type CompareGroupStats = {
+  n: number;
+  // Summary fields are `null` when n=0 (instead of NaN) so the JSON
+  // response stays RFC-8259 compliant.  Use `fmt()` on the frontend.
+  mean: number | null;
+  sd: number | null;
+  median: number | null;
+  q25: number | null;
+  q75: number | null;
+  min: number | null;
+  max: number | null;
+  image_ids: string[];
+  values: number[];
+  /** True when the backend truncated raw values for payload-size reasons. */
+  values_truncated?: boolean;
+};
+
+export type CompareMetricResult = {
+  metric: CompareMetricDef;
+  group_a: CompareGroupStats;
+  group_b: CompareGroupStats;
+  tests: {
+    welch_t_statistic: number | null;
+    welch_p_value: number | null;
+    mann_whitney_u: number | null;
+    mann_whitney_p_value: number | null;
+  };
+  effect_size: {
+    cohens_d: number | null;
+    hedges_g: number | null;
+    hedges_g_ci_low: number | null;
+    hedges_g_ci_high: number | null;
+  };
+  notes: string[];
+};
+
+export type CompareResponse = {
+  group_a: { filter: Record<string, string>; image_count: number };
+  group_b: { filter: Record<string, string>; image_count: number };
+  metrics: CompareMetricResult[];
+};
+
 export type BatchRunRow = {
   id: string;
   owner_id: string;
