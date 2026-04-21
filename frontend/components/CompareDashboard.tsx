@@ -93,9 +93,13 @@ export function CompareDashboard({ images }: { images: MinImage[] }) {
     });
   };
 
+  // Require both sides to narrow at least one field — otherwise an
+  // empty group silently expands to "every image I can read" and the
+  // comparison becomes ambiguous (C3 vs … everyone).
   const canRun =
     selectedMetrics.size > 0 &&
-    (Object.values(groupA).some(Boolean) || Object.values(groupB).some(Boolean));
+    Object.values(groupA).some(Boolean) &&
+    Object.values(groupB).some(Boolean);
 
   const run = async () => {
     setLoading(true);
@@ -484,7 +488,18 @@ function renderBox(
   fill: string,
   stroke: string,
 ) {
-  if (stats.n === 0) return null;
+  // n=0 or any summary field null (backend emits null instead of NaN
+  // for empty groups) → render nothing.
+  if (
+    stats.n === 0 ||
+    stats.min === null ||
+    stats.max === null ||
+    stats.q25 === null ||
+    stats.q75 === null ||
+    stats.median === null
+  ) {
+    return null;
+  }
   const w = 60;
   const left = cx - w / 2;
   const right = cx + w / 2;

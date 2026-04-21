@@ -76,3 +76,19 @@ def test_compare_drops_nans() -> None:
     result = compare(a, b, bootstrap_iters=100)
     assert result.group_a.n == 4  # NaN dropped
     assert result.group_b.n == 3  # Inf dropped
+
+
+def test_compare_empty_group_returns_none_fields() -> None:
+    """Regression guard — Starlette's JSON renderer rejects non-finite
+    floats, so `_summarise` must emit `None` (not NaN) for n=0.  This
+    test also round-trips the result through `json.dumps(..., allow_nan=False)`
+    to be sure the endpoint payload is strict-JSON safe."""
+    import json
+
+    result = compare([], [1.0, 2.0, 3.0], bootstrap_iters=100)
+    assert result.group_a.n == 0
+    assert result.group_a.mean is None
+    assert result.group_a.sd is None
+    assert result.group_a.median is None
+    # Round-trip under allow_nan=False; NaN would fail here.
+    json.dumps(result.to_dict(), allow_nan=False)

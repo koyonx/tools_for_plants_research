@@ -22,14 +22,20 @@ DEFAULT_CI = 0.95
 
 @dataclass(frozen=True)
 class GroupStats:
+    """Summary stats.  All numeric fields are `None` when the group is
+    empty — `NaN` would be the obvious sentinel, but Starlette's JSON
+    renderer rejects non-finite floats so the endpoint would 500
+    instead of returning a clean "n=0" row.
+    """
+
     n: int
-    mean: float
-    sd: float
-    median: float
-    q25: float
-    q75: float
-    min: float
-    max: float
+    mean: float | None
+    sd: float | None
+    median: float | None
+    q25: float | None
+    q75: float | None
+    min: float | None
+    max: float | None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -59,7 +65,7 @@ class ComparisonResult:
 def _summarise(values: np.ndarray) -> GroupStats:
     n = int(values.size)
     if n == 0:
-        return GroupStats(0, math.nan, math.nan, math.nan, math.nan, math.nan, math.nan, math.nan)
+        return GroupStats(0, None, None, None, None, None, None, None)
     return GroupStats(
         n=n,
         mean=float(values.mean()),

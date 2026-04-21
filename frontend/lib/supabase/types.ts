@@ -37,15 +37,19 @@ export type CompareMetricDef = {
 
 export type CompareGroupStats = {
   n: number;
-  mean: number;
-  sd: number;
-  median: number;
-  q25: number;
-  q75: number;
-  min: number;
-  max: number;
+  // Summary fields are `null` when n=0 (instead of NaN) so the JSON
+  // response stays RFC-8259 compliant.  Use `fmt()` on the frontend.
+  mean: number | null;
+  sd: number | null;
+  median: number | null;
+  q25: number | null;
+  q75: number | null;
+  min: number | null;
+  max: number | null;
   image_ids: string[];
   values: number[];
+  /** True when the backend truncated raw values for payload-size reasons. */
+  values_truncated?: boolean;
 };
 
 export type CompareMetricResult = {
