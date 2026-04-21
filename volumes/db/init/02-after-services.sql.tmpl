@@ -180,3 +180,77 @@ DROP TRIGGER IF EXISTS annotations_set_updated_at ON public.annotations;
 CREATE TRIGGER annotations_set_updated_at
   BEFORE UPDATE ON public.annotations
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ===========================================================================
+-- images metadata (PR #8) — add columns for per-plant study groupings.
+--
+-- Lives here (not in 01-schema.sql) so existing deployments pick up the new
+-- columns on `docker compose up`.  `ADD COLUMN IF NOT EXISTS` is idempotent
+-- from PG 9.6 onwards.
+-- ===========================================================================
+ALTER TABLE public.images ADD COLUMN IF NOT EXISTS species            text;
+ALTER TABLE public.images ADD COLUMN IF NOT EXISTS photosynthesis_type text;
+ALTER TABLE public.images ADD COLUMN IF NOT EXISTS plant_id           text;
+ALTER TABLE public.images ADD COLUMN IF NOT EXISTS treatment          text;
+ALTER TABLE public.images ADD COLUMN IF NOT EXISTS captured_at        timestamptz;
+
+-- Restrict photosynthesis_type to known values (null allowed so legacy rows
+-- don't break).  Drop + re-add for PG < 18 that lacks IF NOT EXISTS.
+ALTER TABLE public.images DROP CONSTRAINT IF EXISTS images_photosynthesis_type_check;
+ALTER TABLE public.images ADD CONSTRAINT images_photosynthesis_type_check CHECK (
+  photosynthesis_type IS NULL OR photosynthesis_type IN ('C3', 'C4', 'CAM', 'unknown')
+);
+
+CREATE INDEX IF NOT EXISTS images_species_idx              ON public.images(species);
+CREATE INDEX IF NOT EXISTS images_photosynthesis_type_idx  ON public.images(photosynthesis_type);
+CREATE INDEX IF NOT EXISTS images_plant_id_idx             ON public.images(plant_id);
+CREATE INDEX IF NOT EXISTS images_treatment_idx            ON public.images(treatment);
+
+-- ===========================================================================
+-- batch_runs (PR #8) — groups a fan-out of analyses so Phase B (automated
+-- reports) and Phase C (comparison dashboard) can consume the same structure.
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS public.batch_runs (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id        uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  label           text,                                   -- optional human label
+  criteria        jsonb NOT NULL DEFAULT '{}'::jsonb,     -- e.g. {"species":"Z.mays"}
+  pipeline_kinds  text[] NOT NULL,                        -- e.g. ['basic_measurement','segformer_tissue']
+  image_ids       uuid[] NOT NULL,
+  analysis_ids    uuid[] NOT NULL DEFAULT ARRAY[]::uuid[],
+  status          text NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'running', 'done', 'partial', 'error')),
+  total           integer NOT NULL DEFAULT 0,
+  succeeded       integer NOT NULL DEFAULT 0,
+  failed          integer NOT NULL DEFAULT 0,
+  error           text,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS batch_runs_owner_idx       ON public.batch_runs(owner_id);
+CREATE INDEX IF NOT EXISTS batch_runs_status_idx      ON public.batch_runs(status);
+CREATE INDEX IF NOT EXISTS batch_runs_created_at_idx  ON public.batch_runs(created_at DESC);
+
+ALTER TABLE public.batch_runs ENABLE ROW LEVEL SECURITY;
+
+-- Owner-only for read/write.  Batches carry a snapshot of which images
+-- were selected, so cross-user sharing would need its own visibility
+-- column; for PR #8 we stay simple.
+DROP POLICY IF EXISTS "batch_runs owner read" ON public.batch_runs;
+CREATE POLICY "batch_runs owner read"
+  ON public.batch_runs FOR SELECT
+  TO authenticated
+  USING (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "batch_runs owner write" ON public.batch_runs;
+CREATE POLICY "batch_runs owner write"
+  ON public.batch_runs FOR ALL
+  TO authenticated
+  USING (owner_id = auth.uid())
+  WITH CHECK (owner_id = auth.uid());
+
+DROP TRIGGER IF EXISTS batch_runs_set_updated_at ON public.batch_runs;
+CREATE TRIGGER batch_runs_set_updated_at
+  BEFORE UPDATE ON public.batch_runs
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();

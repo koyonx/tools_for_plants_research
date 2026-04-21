@@ -6,7 +6,26 @@ hasn't tagged a release yet, so everything below is on `main`.
 
 ## [Unreleased]
 
-### PR #7 — validation + release polish (current)
+### PR #8 — study metadata + batch analysis (current)
+- `images` gains `species` / `photosynthesis_type` (C3/C4/CAM/unknown) /
+  `plant_id` / `treatment` / `captured_at` columns via idempotent ALTER
+  in the post-services bootstrap.
+- New `batch_runs` table with ownership RLS; tracks pipeline_kinds,
+  image_ids, analysis_ids, progress counters, terminal status.
+- `POST /batches` fans an image×pipeline matrix over BackgroundTasks
+  (CPU-bound inferences hand off to `asyncio.to_thread`).
+  Dependency-aware: `water_path` resolves against the latest `done`
+  `segformer_tissue` at dispatch time.
+- Dashboard becomes a client-rendered picker: species / C3-C4 /
+  plant_id / treatment filters, per-row checkbox, pipeline selector,
+  batch-kickoff, batch history list, batch detail with progress poll.
+- Inline metadata editor on image detail page (saves on blur).
+- `BatchRunRow` and `PhotosynthesisType` in `lib/supabase/types.ts`.
+- Groundwork for future auto-report (Phase B) and comparison
+  dashboard (Phase C) consumes the same `batch_runs` + `analyses`
+  structure — no refactor needed when those PRs land.
+
+### PR #7 — validation + release polish
 - `scripts/validate_against_xlsx.py` to compare basic-measurement output
   against the legacy `measure_results.xlsx` ground truth.  Supports three
   auth modes (`--access-token` for magic-link users, `--user-email` +

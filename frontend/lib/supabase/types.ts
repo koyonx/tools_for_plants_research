@@ -3,6 +3,8 @@
 
 export type Visibility = "private" | "lab" | "public";
 
+export type PhotosynthesisType = "C3" | "C4" | "CAM" | "unknown";
+
 export type ImageRow = {
   id: string;
   owner_id: string;
@@ -14,6 +16,29 @@ export type ImageRow = {
   width_px: number | null;
   height_px: number | null;
   scale_um_per_px: number | null;
+  // PR #8 study metadata
+  species: string | null;
+  photosynthesis_type: PhotosynthesisType | null;
+  plant_id: string | null;
+  treatment: string | null;
+  captured_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BatchRunRow = {
+  id: string;
+  owner_id: string;
+  label: string | null;
+  criteria: Record<string, unknown>;
+  pipeline_kinds: string[];
+  image_ids: string[];
+  analysis_ids: string[];
+  status: "pending" | "running" | "done" | "partial" | "error";
+  total: number;
+  succeeded: number;
+  failed: number;
+  error: string | null;
   created_at: string;
   updated_at: string;
 };
