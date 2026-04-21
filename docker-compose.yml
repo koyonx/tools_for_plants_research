@@ -29,10 +29,16 @@ services:
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
       ANON_KEY: ${ANON_KEY}
       SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      PLANTS_SEGFORMER_DIR: ${PLANTS_SEGFORMER_DIR:-/models/segformer}
     volumes:
       - ./backend/app:/app/app
       - ./backend/tests:/app/tests
       - plants-ml-cache:/root/.cellpose
+      - plants-hf-cache:/root/.cache/huggingface
+      # Fine-tuned SegFormer checkpoints live here (ignored by git).
+      # Run the training notebook locally, then drop the HF-format
+      # directory into ./models/segformer.
+      - ./models:/models:ro
     ports:
       - "8001:8001"
     networks:
@@ -66,3 +72,4 @@ services:
 
 volumes:
   plants-ml-cache:
+  plants-hf-cache:

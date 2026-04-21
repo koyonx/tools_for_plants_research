@@ -93,8 +93,8 @@ tools_for_plants_research/
 | #3 | スケール検出 + 葉領域抽出 + 基本計測 | ✅ マージ済 |
 | #4 | ブラウザ内アノテーションワークフロー | ✅ マージ済 |
 | #5a | ポリゴン→マスクのラスタライズ + 学習データエクスポート | ✅ マージ済 |
-| #5b | Cellpose で細胞/気孔候補の自動検出（本PR） | 🔨 進行中 |
-| #5c | SegFormer 推論 + 訓練ノートブック | ⏳ |
+| #5b | Cellpose で細胞/気孔候補の自動検出 | ✅ マージ済 |
+| #5c | SegFormer 推論 + 訓練ノートブック（本PR） | 🔨 進行中 |
 | #6 | 最短経路 + 透水マップ | ⏳ |
 | #7 | 精度検証 + リリース整備 | ⏳ |
 
@@ -130,6 +130,18 @@ Web 完結のポリゴンエディタ。napari は使わず、研究室内複数
 - 既存ポリゴンをクリックすると自分のものなら削除
 - `annotations` テーブルに polygon を JSON で保存（ピクセル座標、image_id にひも付け）
 - PR #5 でバックエンドが polygon をラスタライズして SegFormer の学習データに変換
+
+## SegFormer 組織分割（PR #5c）
+
+PR #4 のアノテーションを学習データに変換（PR #5a）→ SegFormer (`nvidia/mit-b0`) を fine-tune → 得た checkpoint を backend がドロップインで読んで UI から推論できる。深層学習本体はユーザー側で訓練、推論はアプリに内蔵という分担。
+
+- **訓練**: `notebooks/segformer_train.ipynb`（ダッシュボードからダウンロードした `plants-research-training.zip` をそのまま入力、出力は `models/segformer/`）
+- **Backend**: `pipeline/segformer_infer.py`（遅延シングルトン model、up-sample argmax → 各クラスの `findContours` → polygon + coverage 統計）
+- **Endpoints**:
+  - `GET /analyze/segformer/status` → checkpoint の有無を返す（UI の state 判定用）
+  - `POST /images/{id}/analyze/segformer` → `analyses(kind='segformer_tissue')` 行 + BackgroundTasks + `asyncio.to_thread`
+- **UI**: `SegFormerPanel` がクラス別の面積 (µm² or px²) + coverage 比率を表でまとめつつ、タイソークラス色の透過 polygon を画像にオーバーレイ
+- **運用**: checkpoint 未配置時は UI が「checkpoint 未配置」と表示、backend は 503 を返す（Cellpose / 基本計測は独立で動作）
 
 ## Cellpose 細胞検出（PR #5b）
 

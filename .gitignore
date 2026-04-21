@@ -43,6 +43,7 @@ pnpm-debug.log*
 # Project data (never commit raw images / weights / results)
 data/
 models/
+!models/.gitkeep
 outputs/
 *.pt
 *.pth
