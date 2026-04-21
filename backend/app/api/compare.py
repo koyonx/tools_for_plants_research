@@ -122,6 +122,67 @@ METRICS: tuple[MetricDef, ...] = (
         analysis_kind="water_path",
         path=("sink_count",),
     ),
+    # CO2 diffusion morphometrics (Evans & von Caemmerer / Tosens et al.
+    # 2D cross-section proxies).  S_mes/S and S_c/S are dimensionless —
+    # the 2D definitions divide cell/chloroplast perimeter sum by leaf
+    # section length, so the ratio is comparable across species even
+    # without a ground-truth um/px scale bar.
+    MetricDef(
+        key="co2_s_mes_s",
+        label="S_mes/S (葉肉細胞露出面/葉面)",
+        unit="-",
+        analysis_kind="co2_morphometrics",
+        path=("s_mes_s",),
+    ),
+    MetricDef(
+        key="co2_s_c_s",
+        label="S_c/S (葉緑体露出面/葉面)",
+        unit="-",
+        analysis_kind="co2_morphometrics",
+        path=("s_c_s",),
+    ),
+    MetricDef(
+        key="co2_f_ias",
+        label="f_ias (細胞間隙率)",
+        unit="-",
+        analysis_kind="co2_morphometrics",
+        path=("f_ias",),
+    ),
+    MetricDef(
+        key="co2_t_cw_median_um",
+        label="T_cw 中央 (細胞壁厚 proxy)",
+        unit="µm",
+        analysis_kind="co2_morphometrics",
+        path=("cell_wall", "t_cw_median_um"),
+    ),
+    MetricDef(
+        key="co2_t_cw_p95_um",
+        label="T_cw 95%tile (細胞壁厚 proxy)",
+        unit="µm",
+        analysis_kind="co2_morphometrics",
+        path=("cell_wall", "t_cw_p95_um"),
+    ),
+    MetricDef(
+        key="co2_chloroplast_count",
+        label="葉緑体数",
+        unit="個",
+        analysis_kind="co2_morphometrics",
+        path=("chloroplasts", "count"),
+    ),
+    MetricDef(
+        key="co2_chloroplast_coverage",
+        label="葉緑体 / 葉肉細胞面積比",
+        unit="-",
+        analysis_kind="co2_morphometrics",
+        path=("chloroplasts", "coverage_of_mesophyll_cells"),
+    ),
+    MetricDef(
+        key="co2_mesophyll_thickness_median_um",
+        label="葉肉層厚 中央",
+        unit="µm",
+        analysis_kind="co2_morphometrics",
+        path=("mesophyll", "thickness_median_um"),
+    ),
 )
 METRICS_BY_KEY: dict[str, MetricDef] = {m.key: m for m in METRICS}
 
