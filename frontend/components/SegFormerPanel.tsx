@@ -268,6 +268,24 @@ function SegFormerOverlay({
         {polygons.map((p, i) => {
           const cls = TISSUE_CLASS_BY_KEY[p.class_key];
           const color = cls?.color ?? "#888";
+          // If holes are present, render a `<path>` with fill-rule
+          // evenodd so enclosed classes show through.  Outer ring +
+          // each hole becomes a separate `M … Z` subpath.
+          if (p.holes && p.holes.length > 0) {
+            const ringToPath = (ring: [number, number][]) =>
+              `M ${ring.map(([x, y]) => `${x},${y}`).join(" L ")} Z`;
+            const d = [ringToPath(p.polygon), ...p.holes.map(ringToPath)].join(" ");
+            return (
+              <path
+                key={`${p.class_key}-${i}-${p.polygon[0]?.[0].toFixed(1)}`}
+                d={d}
+                fill={hexToRgba(color, 0.22)}
+                fillRule="evenodd"
+                stroke={color}
+                strokeWidth={strokeWidthPx}
+              />
+            );
+          }
           return (
             <polygon
               key={`${p.class_key}-${i}-${p.polygon[0]?.[0].toFixed(1)}`}

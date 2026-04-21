@@ -45,6 +45,11 @@ class TissuePolygon:
     class_key: str
     polygon: list[list[float]]
     area_px: int
+    # Inner rings (holes) within the outer `polygon`.  Frontend renders
+    # this as an SVG `<path>` with `fill-rule="evenodd"` so enclosed
+    # classes (e.g. xylem inside a bundle-sheath ring) aren't covered
+    # by the outer polygon's translucent fill.
+    holes: list[list[list[float]]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -202,23 +207,55 @@ def detect_tissue(
             )
         )
 
-        contours, _ = cv2.findContours(class_mask * 255, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for contour in contours:
+        # RETR_CCOMP gives a 2-level hierarchy: outer contours at the top,
+        # holes (where another class punches through) as their children.
+        # We keep the outers and attach their children as `holes`, so a
+        # bundle-sheath ring around xylem doesn't paint a solid disk over
+        # the xylem polygon at render time.
+        contours, hierarchy = cv2.findContours(
+            class_mask * 255, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
+        )
+
+        def _approx(contour: np.ndarray) -> list[list[float]]:
+            epsilon = 0.005 * cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            return [
+                [float(p[0][0]) * inv_factor, float(p[0][1]) * inv_factor] for p in approx
+            ]
+
+        # hierarchy is shape (1, N, 4): [next, prev, first_child, parent].
+        h = hierarchy[0] if hierarchy is not None else []
+        for i, contour in enumerate(contours):
+            entry = h[i] if i < len(h) else None
+            parent = int(entry[3]) if entry is not None else -1
+            if parent != -1:
+                # Skip child contours here — they're attached as holes
+                # to whichever outer contour we'd already emit.
+                continue
             area_ds = float(cv2.contourArea(contour))
             if area_ds < MIN_CONTOUR_AREA_DS_PX:
                 continue
-            epsilon = 0.005 * cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, epsilon, True)
-            polygon = [
-                [float(p[0][0]) * inv_factor, float(p[0][1]) * inv_factor] for p in approx
-            ]
-            if len(polygon) < 3:
+            outer = _approx(contour)
+            if len(outer) < 3:
                 continue
+
+            holes: list[list[list[float]]] = []
+            child_idx = int(entry[2]) if entry is not None else -1
+            while child_idx != -1 and child_idx < len(contours):
+                child = contours[child_idx]
+                child_area_ds = float(cv2.contourArea(child))
+                if child_area_ds >= MIN_CONTOUR_AREA_DS_PX:
+                    hole = _approx(child)
+                    if len(hole) >= 3:
+                        holes.append(hole)
+                child_idx = int(h[child_idx][0])  # next sibling
+
             polygon_rows.append(
                 TissuePolygon(
                     class_key=key,
-                    polygon=polygon,
+                    polygon=outer,
                     area_px=int(area_ds * inv_factor * inv_factor),
+                    holes=holes,
                 )
             )
 

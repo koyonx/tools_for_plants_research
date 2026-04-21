@@ -70,6 +70,9 @@ export type SegFormerPolygon = {
   class_key: string;
   polygon: [number, number][];
   area_px: number;
+  // Inner rings (holes) — rendered with SVG fill-rule="evenodd" so any
+  // class enclosed by this polygon stays visible underneath.
+  holes?: [number, number][][];
 };
 
 export type SegFormerResult = {
