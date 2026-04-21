@@ -151,6 +151,27 @@ class SupabaseAuthedClient:
         rows: list[dict[str, Any]] = response.json()
         return rows[0] if rows else None
 
+    async def list_analyses(
+        self,
+        *,
+        image_ids: list[str] | None = None,
+        kind: str | None = None,
+        status: str | None = None,
+        order: str = "created_at.desc",
+    ) -> list[dict[str, Any]]:
+        """Filtered analyses list.  `image_ids` becomes a PostgREST
+        `in.(...)` so one round-trip covers N images."""
+        params: dict[str, str] = {"select": "*", "order": order}
+        if image_ids:
+            params["image_id"] = "in.(" + ",".join(image_ids) + ")"
+        if kind:
+            params["kind"] = f"eq.{kind}"
+        if status:
+            params["status"] = f"eq.{status}"
+        response = await self._request("GET", "/rest/v1/analyses", params=params)
+        rows: list[dict[str, Any]] = response.json()
+        return rows
+
     async def latest_analysis_for(
         self,
         image_id: str,

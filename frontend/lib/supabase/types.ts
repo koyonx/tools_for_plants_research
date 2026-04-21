@@ -26,6 +26,53 @@ export type ImageRow = {
   updated_at: string;
 };
 
+// PR #9 — comparison dashboard types
+export type CompareMetricDef = {
+  key: string;
+  label: string;
+  unit: string;
+  analysis_kind: string;
+  path: string[];
+};
+
+export type CompareGroupStats = {
+  n: number;
+  mean: number;
+  sd: number;
+  median: number;
+  q25: number;
+  q75: number;
+  min: number;
+  max: number;
+  image_ids: string[];
+  values: number[];
+};
+
+export type CompareMetricResult = {
+  metric: CompareMetricDef;
+  group_a: CompareGroupStats;
+  group_b: CompareGroupStats;
+  tests: {
+    welch_t_statistic: number | null;
+    welch_p_value: number | null;
+    mann_whitney_u: number | null;
+    mann_whitney_p_value: number | null;
+  };
+  effect_size: {
+    cohens_d: number | null;
+    hedges_g: number | null;
+    hedges_g_ci_low: number | null;
+    hedges_g_ci_high: number | null;
+  };
+  notes: string[];
+};
+
+export type CompareResponse = {
+  group_a: { filter: Record<string, string>; image_count: number };
+  group_b: { filter: Record<string, string>; image_count: number };
+  metrics: CompareMetricResult[];
+};
+
 export type BatchRunRow = {
   id: string;
   owner_id: string;

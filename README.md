@@ -98,8 +98,8 @@ open http://localhost:3001                    # Supabase Studio
 | #5c | SegFormer 推論 + 訓練ノートブック | ✅ |
 | #6 | 最短経路 + 透水マップ | ✅ |
 | #7 | 精度検証 + リリース整備 | ✅ |
-| #8 | 研究メタデータ + バッチ解析（本PR） | 🔨 |
-| #9 | 統計比較ダッシュボード | ⏳ |
+| #8 | 研究メタデータ + バッチ解析 | ✅ |
+| #9 | 統計比較ダッシュボード（本PR） | 🔨 |
 | #10 | CO2 固有形態パラメータ（S_mes/S、葉緑体検出） | ⏳ |
 | #11 | ガス交換データ取り込み（LI-COR） | ⏳ |
 | #12 | Darcy 流 PDE ソルバ | ⏳ |
@@ -157,6 +157,17 @@ open http://localhost:3001                    # Supabase Studio
 - 各シンクから FMM 場の勾配降下で polyline を辿る、source 未到達時は Euclidean 最近接に snap（UI で破線表示）
 - UI: マグマヒートマップを `mix-blend-screen` で重ね描画 + polyline + 各種統計
 - live SegFormer-availability probe（mount + on focus + 10s poll、viewer は probe なし）
+
+## 統計比較ダッシュボード（PR #9）
+
+`/dashboard/compare` で 2 グループ間の有意差を検定する。C3 vs C4 のような対比が主用途。
+
+- **フィルタビルダー**: `species` / `photosynthesis_type` / `plant_id` / `treatment` の組み合わせで 2 グループを定義
+- **指標選択**: `/compare/metrics` で定義された 9 指標（葉面積 / 葉厚 / Cellpose セル数 / 平均細胞面積 / 水経路 travel time mean/median / 気孔数 等）から選択
+- **検定**: Welch's t-test（等分散不問）+ Mann-Whitney U（非パラメトリック）
+- **効果量**: Cohen's d + Hedges' g（小標本補正）+ 95% bootstrap CI
+- **可視化**: per-metric 表 + SVG boxplot（jitter 付きで個別値を可視）
+- バックエンドは 1 指標あたり 1 クエリで解析行を一括取得、PostgREST `in.(...)` で N+1 回避
 
 ## 研究メタデータ + バッチ解析（PR #8）
 

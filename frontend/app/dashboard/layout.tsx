@@ -21,6 +21,18 @@ export default async function DashboardLayout({
             plants-research
           </Link>
           <div className="flex items-center gap-4 text-sm">
+            <Link
+              href="/dashboard/compare"
+              className="text-neutral-600 hover:underline dark:text-neutral-300"
+            >
+              比較
+            </Link>
+            <Link
+              href="/dashboard/batches"
+              className="text-neutral-600 hover:underline dark:text-neutral-300"
+            >
+              バッチ履歴
+            </Link>
             <span className="text-neutral-500">{user.email}</span>
             <form action="/auth/signout" method="post">
               <button

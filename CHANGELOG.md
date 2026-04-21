@@ -6,7 +6,27 @@ hasn't tagged a release yet, so everything below is on `main`.
 
 ## [Unreleased]
 
-### PR #8 — study metadata + batch analysis (current)
+### PR #9 — statistical comparison dashboard (current)
+- `backend/app/pipeline/stats.py`: Welch's t (scipy), Mann-Whitney U,
+  Cohen's d, Hedges' g (with small-sample bias correction), and a
+  percentile bootstrap 95% CI for Hedges' g.  6 pytest cases cover
+  sign, small-group fallback, zero-variance, identical distributions,
+  NaN/inf handling, and correction bounds.
+- `backend/app/api/compare.py`: `/compare/metrics` catalog (9 scalars
+  across basic_measurement / cellpose_cells / water_path), `POST
+  /compare` that resolves two image groups via RLS-aware filters,
+  pulls each metric's analyses row in one batched PostgREST `in.(...)`
+  call per kind, computes tests + effect sizes, and returns raw
+  values so the frontend can draw boxplots.
+- `SupabaseAuthedClient.list_analyses` added for batched filter reads.
+- `/dashboard/compare` page with two filter builders (Group A / B),
+  metric multi-select (pre-populated with basic-measurement keys),
+  results table (n, mean±SD, Welch p, MW p, Hedges g + CI per metric),
+  and per-metric SVG boxplots with deterministic jitter so repaints
+  don't wiggle.
+- Dashboard header gains `比較` and `バッチ履歴` quick links.
+
+### PR #8 — study metadata + batch analysis
 - `images` gains `species` / `photosynthesis_type` (C3/C4/CAM/unknown) /
   `plant_id` / `treatment` / `captured_at` columns via idempotent ALTER
   in the post-services bootstrap.
