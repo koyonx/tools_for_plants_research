@@ -119,11 +119,14 @@ CREATE TABLE IF NOT EXISTS public.annotations (
 
 -- Add CHECK constraints defensively (ALTER TABLE … ADD CONSTRAINT doesn't
 -- support IF NOT EXISTS before PG 18, so we drop+add to stay idempotent).
+-- Keep the class list in sync with frontend/lib/tissue-classes.ts and
+-- backend/app/pipeline/classes.py.
 ALTER TABLE public.annotations DROP CONSTRAINT IF EXISTS annotations_class_check;
 ALTER TABLE public.annotations ADD CONSTRAINT annotations_class_check CHECK (
   class IN (
     'upper_epidermis', 'lower_epidermis', 'palisade', 'spongy',
-    'bundle_sheath', 'xylem', 'phloem', 'stomata', 'intercellular', 'other'
+    'bundle_sheath', 'xylem', 'xylem_vessel', 'phloem', 'stomata',
+    'intercellular', 'other'
   )
 );
 ALTER TABLE public.annotations DROP CONSTRAINT IF EXISTS annotations_polygon_check;

@@ -94,8 +94,8 @@ tools_for_plants_research/
 | #4 | ブラウザ内アノテーションワークフロー | ✅ マージ済 |
 | #5a | ポリゴン→マスクのラスタライズ + 学習データエクスポート | ✅ マージ済 |
 | #5b | Cellpose で細胞/気孔候補の自動検出 | ✅ マージ済 |
-| #5c | SegFormer 推論 + 訓練ノートブック（本PR） | 🔨 進行中 |
-| #6 | 最短経路 + 透水マップ | ⏳ |
+| #5c | SegFormer 推論 + 訓練ノートブック | ✅ マージ済 |
+| #6 | 最短経路 + 透水マップ（本PR） | 🔨 進行中 |
 | #7 | 精度検証 + リリース整備 | ⏳ |
 
 ## 解析パイプライン（PR #3）
@@ -130,6 +130,21 @@ Web 完結のポリゴンエディタ。napari は使わず、研究室内複数
 - 既存ポリゴンをクリックすると自分のものなら削除
 - `annotations` テーブルに polygon を JSON で保存（ピクセル座標、image_id にひも付け）
 - PR #5 でバックエンドが polygon をラスタライズして SegFormer の学習データに変換
+
+## 水経路 / 透水マップ（PR #6）
+
+PR #5c の SegFormer 結果から導管 (`xylem_vessel`、無ければ `xylem`) をソース、気孔 (`stomata`) をシンクとし、組織クラスごとの水流抵抗を持つコスト場上で `scikit-fmm` (Fast Marching Method) を解いて travel time マップ + 各気孔への最短経路を算出する。
+
+- **新クラス**: `xylem_vessel` (導管) を追加。アノテーション・SegFormer 学習で使えば、より精度の高い水経路解析が可能。無ければ `xylem` (木部) で代用
+- **コスト場**: クラス別水流抵抗（DEFAULT_RESISTANCE）を `pipeline/water_path.py` で定義、リクエスト body から override 可能
+  - 既定値: vessel 0.05, xylem 0.1, palisade 1.0, spongy 1.2, intercellular 0.6, stomata 0.2, epidermis 8.0, …
+  - 葉外の背景は 100.0 (実質的な壁)
+- **endpoints**:
+  - `POST /images/{id}/analyze/water-path` (要 SegFormer 結果完了 → 412 を返す)
+- **Frontend**: 画像詳細ページに WaterPathPanel
+  - 導管/木部からの travel time をマグマ系の半透明ヒートマップで重ね描画
+  - 各気孔と最近接ソースを SVG 線分でハイライト
+  - 平均/中央/最小/最大 travel time を表示
 
 ## SegFormer 組織分割（PR #5c）
 

@@ -107,6 +107,24 @@ class SupabaseAuthedClient:
         rows: list[dict[str, Any]] = response.json()
         return rows[0] if rows else None
 
+    async def latest_analysis_for(
+        self, image_id: str, kind: str
+    ) -> dict[str, Any] | None:
+        """Most recent analyses row for the given image + kind, or None."""
+        response = await self._request(
+            "GET",
+            "/rest/v1/analyses",
+            params={
+                "image_id": f"eq.{image_id}",
+                "kind": f"eq.{kind}",
+                "select": "*",
+                "order": "created_at.desc",
+                "limit": "1",
+            },
+        )
+        rows: list[dict[str, Any]] = response.json()
+        return rows[0] if rows else None
+
     # ---- Storage --------------------------------------------------------
     async def download_image_bytes(self, storage_path: str) -> bytes:
         response = await self._request(
