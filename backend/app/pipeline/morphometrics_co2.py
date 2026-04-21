@@ -615,10 +615,28 @@ def compute_co2_morphometrics(
     # typical max half-gap, i.e. one full wall thickness when two cells
     # share a wall on either side.
     cells_mask_all = _render_cells_mask(cells, h, w, factor)
-    gap_mask = cv2.bitwise_and(mesophyll_mask, cv2.bitwise_not(cells_mask_all))
-    inv_cells = cv2.bitwise_not(cells_mask_all)
-    dt = cv2.distanceTransform(inv_cells, cv2.DIST_L2, 3)
-    gap_dt = dt[gap_mask > 0]
+    # With zero cell pixels, distanceTransform on the all-255 inverse
+    # grid returns FLT_MAX / +inf for every pixel (no seed to measure
+    # against).  Those leak into the result blob and break JSON
+    # encoding (Starlette + json.dumps(allow_nan=False) both reject
+    # Infinity).  Short-circuit: when there's nothing to measure
+    # against, T_cw is undefined — report zeros with a note.
+    has_cells_for_dt = bool(cells_mask_all.max() > 0)
+    if has_cells_for_dt:
+        gap_mask = cv2.bitwise_and(mesophyll_mask, cv2.bitwise_not(cells_mask_all))
+        inv_cells = cv2.bitwise_not(cells_mask_all)
+        dt = cv2.distanceTransform(inv_cells, cv2.DIST_L2, 3)
+        # Guard against the occasional inf / NaN bleed on OpenCV builds
+        # that return FLT_MAX on isolated boundary pixels.
+        gap_dt_raw = dt[gap_mask > 0]
+        gap_dt = gap_dt_raw[np.isfinite(gap_dt_raw)]
+    else:
+        gap_dt = np.empty((0,), dtype=np.float32)
+        notes.append(
+            "no Cellpose cells available for the distance-transform gap measurement; "
+            "T_cw reported as zero."
+        )
+
     if gap_dt.size > 0:
         # Values are distances in down-sampled pixels.  Convert to
         # original-image px with inv_factor, then µm via um_per_px.
