@@ -192,10 +192,6 @@ PYTHON ?= python3
 
 .PHONY: validate
 validate: ## Compare basic_measurement output against ../measure_results.xlsx
-	@[ -n "$$VALIDATE_EMAIL$$VALIDATE_TOKEN" ] || { \
-		echo "error: set VALIDATE_EMAIL=you@example.com (password account) or VALIDATE_TOKEN=<jwt> (paste from devtools)"; \
-		exit 1; \
-	}
 	@command -v $(PYTHON) >/dev/null || { \
 		echo "error: $(PYTHON) not found.  Override with 'make validate PYTHON=python'."; \
 		exit 1; \
@@ -205,7 +201,16 @@ validate: ## Compare basic_measurement output against ../measure_results.xlsx
 		echo "  brew install python@3.12 && make validate PYTHON=python3.12"; \
 		exit 1; \
 	}
+	@# Source .env first so VALIDATE_EMAIL / VALIDATE_TOKEN / ANON_KEY /
+	@# SUPABASE_PUBLIC_URL can all come from the file the rest of the
+	@# stack already uses.  Guard for at least one credential env var
+	@# *after* sourcing so files-only configurations count.
 	@set -a && [ -f $(ENV_FILE) ] && . $(ENV_FILE); set +a; \
+	if [ -z "$$VALIDATE_EMAIL$$VALIDATE_TOKEN" ]; then \
+		echo "error: set VALIDATE_EMAIL=you@example.com (password account) or VALIDATE_TOKEN=<jwt> (paste from devtools)"; \
+		echo "       (may be provided inline, in the calling shell, or in $(ENV_FILE))"; \
+		exit 1; \
+	fi; \
 	if [ -n "$$VALIDATE_TOKEN" ]; then \
 		$(PYTHON) scripts/validate_against_xlsx.py \
 			--xlsx ../measure_results.xlsx \

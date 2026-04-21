@@ -157,8 +157,8 @@ open http://localhost:3001                    # Supabase Studio
 
 ```bash
 # 0) ホスト側 Python に openpyxl + httpx を入れる（初回のみ）。
-#    Python 3.11〜3.13 が必須（macOS CLT の 3.9 はダメ）。
-#    最近の macOS / Ubuntu は PEP 668 でシステム pip を拒否するので venv は必須。
+#    Python 3.11 または 3.12 が必須（numpy<2.0 固定のため 3.13 はまだ未対応。
+#    macOS CLT の 3.9 もダメ）。PEP 668 対策で venv は必須。
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e 'backend[dev]'
 # もしくは最小構成: pip install openpyxl httpx
@@ -177,7 +177,7 @@ VALIDATE_TOKEN="eyJhbGciOi..." make validate
 # → outputs/validation_report.md + .json が cwd 直下に生成される
 ```
 
-> `make validate` は既定で `python3` を使う。`python3 --version` が 3.11 未満の環境（macOS Command Line Tools の 3.9 など）では `make validate PYTHON=python3.12` のように上書きする。
+> `make validate` は既定で `python3` を使う。`python3 --version` が 3.11 未満（macOS CLT の 3.9）または 3.13 以上（Homebrew の最新）の場合は `make validate PYTHON=python3.12` のように上書きする。`VALIDATE_EMAIL` / `VALIDATE_TOKEN` は `.env` に書いても OK（inline env var と同様に拾う）。
 
 `make validate` は `.env` を自動 source するので `ANON_KEY` 等は事前 export 不要。スクリプトは N 行に拡張可能。`測定タイプ=Distance` `メモ=厚さ` → `leaf_mean_thickness_um`、`メモ=葉肉の厚さ` → `leaf_median_thickness_um` のマッピングは `--metric-map '{...}'` で上書き可能。`維管束面積` は basic_measurement では出ないので N/A（SegFormer の xylem polygon 面積で別途比較）。
 
