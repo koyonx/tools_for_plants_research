@@ -2,6 +2,9 @@
 name = "plants-research-backend"
 version = "0.1.0"
 description = "FastAPI backend for plant tissue image analysis"
+# 3.13 needs numpy>=2 wheels; our stack is still pinned to `numpy>=1.26,<2`
+# (safer across the cellpose / torch / transformers matrix), so gate the
+# interpreter range accordingly.  Lift this when bumping numpy to 2.x.
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "fastapi>=0.115.0",
@@ -24,6 +27,9 @@ dev = [
     "ruff>=0.7.0",
     "mypy>=1.13.0",
     "types-requests>=2.32.0",
+    # Used by scripts/validate_against_xlsx.py.  Lives in the dev extra
+    # because production runtime never reads spreadsheets.
+    "openpyxl>=3.1",
 ]
 # The `ml` extra carries PyTorch + Cellpose so the lightweight checks
 # (ruff / mypy / pytest) in CI don't pay the ~1.5 GB install every run.

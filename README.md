@@ -1,209 +1,257 @@
-
 # tools_for_plants_research
 
-植物組織画像（顕微鏡切片）の全自動解析ツール。葉の厚み・葉肉厚・維管束面積・気孔と維管束間の距離・水の通りやすさマップまでを Web UI 上で生成する。
+植物組織画像（顕微鏡切片）の全自動解析ツール。葉の厚み・葉肉厚・組織クラス分割・細胞検出・**水経路 / 透水マップ** までを Web UI 上で生成する。
 
 ## アーキテクチャ
 
 ```
-┌─────────────┐       ┌─────────────┐       ┌──────────────────┐
-│  Next.js    │◄─REST─►│  FastAPI    │◄─SQL─►│ Supabase         │
-│  (frontend) │       │  (backend)  │       │ (Auth/DB/Storage)│
-└─────────────┘       └─────────────┘       └──────────────────┘
-         ▲                     ▲                     ▲
-         └────── docker compose (Apple Silicon 対応) ────┘
+┌─────────────┐  REST   ┌──────────────────────┐  SQL   ┌────────────────────────┐
+│  Next.js 14 │◄───────►│  FastAPI (uvicorn)   │◄──────►│  Supabase self-host     │
+│  (frontend) │         │  + ML pipeline        │        │  (Postgres + Auth +     │
+│             │         │  asyncio.to_thread    │        │   PostgREST + Storage + │
+└─────────────┘         │  for CPU-bound runs   │        │   Kong + Studio)        │
+       │                └──────────────────────┘        └────────────────────────┘
+       │                          ▲
+       │                          │ user JWT
+       │                          ▼
+       │                ┌──────────────────────┐
+       └───────────────►│  Supabase REST       │   ◄── RLS enforced end-to-end
+            JWT          │  (PostgREST + Kong) │
+                        └──────────────────────┘
+                                 ▲
+                                 │ named volumes (cache)
+                          ┌──────┴───────┐
+                          │ plants-ml    │  Cellpose cyto3 (~26 MB)
+                          │ plants-hf    │  HF transformers cache
+                          └──────────────┘
 ```
 
-- **Frontend**: Next.js 14 (App Router) + TypeScript + Tailwind + shadcn/ui
-- **Backend**: FastAPI (Python 3.11) + Pydantic v2
-- **Auth / DB / Storage**: Supabase (self-hosted → 将来 Supabase Cloud へシームレス移行)
-- **ML (今後のPRで追加)**: PyTorch + SAM2 + Cellpose + scikit-fmm + FiPy
+- **Frontend**: Next.js 14 App Router + TypeScript + Tailwind + shadcn-ish + Konva (annotations) + React Zoom Pan Pinch
+- **Backend**: FastAPI 0.115 + Pydantic v2 + supabase-py (httpx wrapper for RLS-aware reads/writes via the caller's JWT)
+- **ML**: classical CV (OpenCV + numpy + scipy) + Cellpose 3 + HuggingFace transformers (SegFormer) + scikit-fmm
+- **DB / auth / storage**: Supabase self-hosted; idempotent post-init bootstrap container
 
-## セットアップ
+> **Required tooling**: GNU make 4+ (default on Linux; on macOS install via `brew install make` if `make --version` reports something older).  Docker Desktop 4.30+, Docker Compose v2.20+.
 
-### 前提
-- Docker Desktop（Apple Silicon 対応版） 4.30+
-- Docker Compose v2.20+ （`include:` ディレクティブ利用のため）
-- `gh` CLI（任意、PR操作用）
-
-### 手順
+## クイックスタート
 
 ```bash
-# 1. .env を準備
-cp .env.example .env
+# 1) 環境ファイル
+make init-env                                 # cp .env.example .env
 
-# 2. JWT_SECRET を生成して .env に書き込む
-openssl rand -base64 48 | tr -d '\n'     # 出力を JWT_SECRET= に貼る
+# 2) JWT 秘密鍵を生成（.env の JWT_SECRET に貼る）
+openssl rand -base64 48 | tr -d '\n'
 
-# 3. ANON_KEY と SERVICE_ROLE_KEY を JWT_SECRET から生成
-./scripts/generate-jwt.sh "<上で生成した JWT_SECRET>"
-# 出力 2 行を .env に貼る
+# 3) anon / service_role キー（手順 2 の値を引数に）
+make gen-jwt                                  # ANON_KEY / SERVICE_ROLE_KEY が出る → .env に貼る
 
-# 4. POSTGRES_PASSWORD / DASHBOARD_PASSWORD も書き換える
-# NEXT_PUBLIC_SUPABASE_ANON_KEY は ANON_KEY と同じ値を入れる
+# 4) POSTGRES_PASSWORD / DASHBOARD_PASSWORD も書き換える
+#    NEXT_PUBLIC_SUPABASE_ANON_KEY = ANON_KEY と同じ値
 
-# 5. 起動
-docker compose up -d
+# 5) 起動 + 動作確認
+make up
+make smoke                                    # /health / /analyze/segformer/status / フロント
 
-# 3. 動作確認
-open http://localhost:3000          # フロントエンド
-curl http://localhost:8001/health   # バックエンド
-open http://localhost:8000          # Supabase API (Kong)
-open http://localhost:3001          # Supabase Studio
+# 6) ブラウザ
+open http://localhost:3000                    # アプリ
+open http://localhost:3001                    # Supabase Studio
 ```
 
-### 停止・完全削除
+`make help` で全 30+ ターゲット一覧が見える。
 
-```bash
-docker compose down          # コンテナ停止（データは残る）
-docker compose down -v       # ボリュームごと削除（DBリセット）
-```
-
-## ディレクトリ構成
+## エンドツーエンドのワークフロー
 
 ```
-tools_for_plants_research/
-├── docker-compose.yml             # 本プロジェクトのサービス（backend, frontend）
-├── docker-compose.supabase.yml    # Supabase セルフホスト一式
-├── .env.example
-├── backend/                       # FastAPI
-│   ├── app/
-│   │   ├── api/        # REST ルート
-│   │   ├── core/       # 設定・Supabase クライアント
-│   │   └── pipeline/   # 画像解析パイプライン（後続 PR で実装）
-│   └── tests/
-├── frontend/                      # Next.js
-│   ├── app/
-│   ├── components/
-│   └── lib/
-├── scripts/
-│   └── generate-jwt.sh            # Supabase anon/service JWT 生成
-├── volumes/
-│   ├── api/kong.yml               # Kong ルーティング設定
-│   └── db/init/                   # Postgres 初期化 SQL
-└── docs/
+[1] 画像アップロード ─→ images テーブル + Storage
+       │
+       ▼
+[2] アノテーション (任意)         ─→ annotations テーブル（ポリゴン）
+       │
+       ▼
+[3] 学習データエクスポート ─→ training/export.zip
+       │
+       ▼
+[4] notebooks/segformer_train.ipynb ─→ models/segformer/
+       │
+       ▼
+[5] SegFormer 推論 (UI)           ─→ analyses(kind=segformer_tissue)
+       │
+       ▼
+[6] Cellpose 細胞検出 (任意, UI)   ─→ analyses(kind=cellpose_cells)
+       │
+       ▼
+[7] 水経路 (UI)                   ─→ analyses(kind=water_path) + ヒートマップ
 ```
+
+詳細は各機能の節を参照。
 
 ## マイルストーン
 
 | PR | 内容 | 状態 |
 |----|------|------|
-| #1 | インフラ土台 | ✅ マージ済 |
-| #2 | 認証 + 画像アップロード + ビューワー | ✅ マージ済 |
-| #3 | スケール検出 + 葉領域抽出 + 基本計測 | ✅ マージ済 |
-| #4 | ブラウザ内アノテーションワークフロー | ✅ マージ済 |
-| #5a | ポリゴン→マスクのラスタライズ + 学習データエクスポート | ✅ マージ済 |
-| #5b | Cellpose で細胞/気孔候補の自動検出 | ✅ マージ済 |
-| #5c | SegFormer 推論 + 訓練ノートブック | ✅ マージ済 |
-| #6 | 最短経路 + 透水マップ（本PR） | 🔨 進行中 |
-| #7 | 精度検証 + リリース整備 | ⏳ |
+| #1 | インフラ土台 | ✅ |
+| #2 | 認証 + 画像アップロード + ビューワー | ✅ |
+| #3 | スケール検出 + 葉領域抽出 + 基本計測 | ✅ |
+| #4 | ブラウザ内アノテーションワークフロー | ✅ |
+| #5a | ポリゴン→マスクのラスタライズ + 学習データエクスポート | ✅ |
+| #5b | Cellpose で細胞検出 | ✅ |
+| #5c | SegFormer 推論 + 訓練ノートブック | ✅ |
+| #6 | 最短経路 + 透水マップ | ✅ |
+| #7 | 精度検証 + リリース整備（本PR） | 🔨 |
 
-## 解析パイプライン（PR #3）
+## 機能
 
-Classical CV のみで実装（深層学習は PR #5 以降）:
+### 基本計測（PR #3）
 
-1. **スケールバー検出** — 画像右下 30% × 15% の ROI で Otsu 二値化、水平方向に
-   morphology close、最も幅の大きい connected component を採用。ユーザーが指定した
-   µm 値と px 幅から `um_per_px` を算出。
-2. **葉領域抽出** — HSV の Saturation に Otsu 適用、morphology open/close の後
-   最大連結成分を葉マスクとして採用。
-3. **計測** — 各列の min/max y から縦方向の厚み px を取り、`um_per_px` で µm に換算。
-   葉面積はマスク画素数 × (µm/px)²。
+- 右下 ROI のスケールバー検出 → µm/px キャリブレーション
+- HSV Saturation + Otsu で葉領域抽出
+- 各列の min/max y で厚みプロファイル（最大 512 点）
+- summary stats は全列で計算（≠ 間引き後）
+- UI: 純 SVG 折れ線チャート + CSV ダウンロード
 
-バックエンドエンドポイント:
-- `POST /images/{id}/analyze` — 上記を同期実行し結果を `analyses` テーブルに保存
-- `GET /analyses/{id}` — 結果取得
-- `GET /analyses/{id}/csv` — サマリ + 厚みプロファイルを CSV で出力
+### アノテーション（PR #4）
 
-UI:
-- 画像詳細ページに「基本計測」パネル。スケール長 (µm) を入れて「解析する」を押すと
-  結果と厚みプロファイル SVG チャートが表示される。CSV ダウンロード可。
+- Konva ベースの pan/zoom + ポリゴン入力
+- クリックで頂点、Enter 確定、Backspace 1 点戻す、Esc 取消、Space 押しながらドラッグでパン
+- 既存ポリゴンクリックで（自分のもののみ）削除
+- DB 側で `class` enum + `is_valid_polygon(jsonb)` CHECK で整合性保証
+- RLS: 画像が読めるユーザは閲覧 OK、insert/update/delete は所有者のみ
 
-## アノテーション（PR #4）
+### 学習データエクスポート（PR #5a）
 
-Web 完結のポリゴンエディタ。napari は使わず、研究室内複数人がブラウザから直接ラベル付けできる。
+- `pipeline/rasterize.py`: ポリゴン → uint8 PNG（0=背景、1..N=クラス）、last-write-wins
+- `GET /training/export.zip` で `images/` + `masks/` + `classes.json` + `index.json` を bundle
+- 「未ラベルも含める」トグル付き
+- マスクは SegFormer の `AutoImageProcessor` がそのまま受け取れる形
 
-- `/dashboard/images/[id]/annotate` に Konva ベースのキャンバスエディタ
-- クラスは `frontend/lib/tissue-classes.ts` と `backend/app/pipeline/classes.py` で共通管理
-  （表皮 / 柵状 / 海綿状 / 維管束鞘 / 木部 / 師部 / 気孔 / 細胞間隙 / その他）
-- クリックで頂点追加、Enter で確定、Backspace で 1 点戻る、Esc で取消、ホイール/ドラッグで zoom/pan
-- 既存ポリゴンをクリックすると自分のものなら削除
-- `annotations` テーブルに polygon を JSON で保存（ピクセル座標、image_id にひも付け）
-- PR #5 でバックエンドが polygon をラスタライズして SegFormer の学習データに変換
+### Cellpose 細胞検出（PR #5b）
 
-## 水経路 / 透水マップ（PR #6）
+- Cellpose 3 cyto3 generalist model（重み ~26 MB、初回 DL 後は volume cache）
+- 1024 px に down-sample → 推論 → 原座標にスケール戻し
+- per-cell polygon + centroid + area_px、mean/median 統計
+- BackgroundTask + `asyncio.to_thread` で event loop ブロック回避
+- UI: terminal-gated polling（transient 失敗で停止しない）+ SVG polygon overlay
 
-PR #5c の SegFormer 結果から導管 (`xylem_vessel`、無ければ `xylem`) をソース、気孔 (`stomata`) をシンクとし、組織クラスごとの水流抵抗を持つコスト場上で `scikit-fmm` (Fast Marching Method) を解いて travel time マップ + 各気孔への最短経路を算出する。
+### SegFormer 組織分割（PR #5c）
 
-- **新クラス**: `xylem_vessel` (導管) を追加。アノテーション・SegFormer 学習で使えば、より精度の高い水経路解析が可能。無ければ `xylem` (木部) で代用
-- **コスト場**: クラス別水流抵抗（DEFAULT_RESISTANCE）を `pipeline/water_path.py` で定義、リクエスト body から override 可能
-  - 既定値: vessel 0.05, xylem 0.1, palisade 1.0, spongy 1.2, intercellular 0.6, stomata 0.2, epidermis 8.0, …
-  - 葉外の背景は 100.0 (実質的な壁)
-- **endpoints**:
-  - `POST /images/{id}/analyze/water-path` (要 SegFormer 結果完了 → 412 を返す)
-- **Frontend**: 画像詳細ページに WaterPathPanel
-  - 導管/木部からの travel time をマグマ系の半透明ヒートマップで重ね描画
-  - 各気孔と最近接ソースを SVG 線分でハイライト
-  - 平均/中央/最小/最大 travel time を表示
+- ユーザーが `notebooks/segformer_train.ipynb` で訓練 → `models/segformer/` に置く
+- 起動時 probe: `GET /analyze/segformer/status` で checkpoint の有無 + 完全性 (`config.json` + `preprocessor_config.json` + weights) を返す
+- 完全性チェックを probe と POST 検証で同期、不完全な checkpoint で job を queue しない
+- 推論: 1024 px down-sample → bilinear upsample → argmax → `cv2.RETR_CCOMP` で hierarchy 付き polygon 抽出
+- UI: クラス別面積表 + SVG polygon overlay（hole 有りは `<path fill-rule="evenodd">` で穴抜き）
 
-## SegFormer 組織分割（PR #5c）
+### 水経路 / 透水マップ（PR #6）
 
-PR #4 のアノテーションを学習データに変換（PR #5a）→ SegFormer (`nvidia/mit-b0`) を fine-tune → 得た checkpoint を backend がドロップインで読んで UI から推論できる。深層学習本体はユーザー側で訓練、推論はアプリに内蔵という分担。
+- 入力: SegFormer 結果（クラス別 polygon + image_shape）
+- ソース: `xylem_vessel`（導管）優先、無ければ `xylem` (木部) にフォールバック
+- シンク: `stomata` polygon centroid（absorbing boundary ではなく、サンプル点）
+- コスト場: クラス別水流抵抗（`DEFAULT_RESISTANCE`、リクエストで override 可、サニタイズ付き）
+- `skfmm.travel_time(phi, speed=1/cost, dx=inv_factor)` で原画像 px 単位の travel time を計算
+- 各シンクから FMM 場の勾配降下で polyline を辿る、source 未到達時は Euclidean 最近接に snap（UI で破線表示）
+- UI: マグマヒートマップを `mix-blend-screen` で重ね描画 + polyline + 各種統計
+- live SegFormer-availability probe（mount + on focus + 10s poll、viewer は probe なし）
 
-- **訓練**: `notebooks/segformer_train.ipynb`（ダッシュボードからダウンロードした `plants-research-training.zip` をそのまま入力、出力は `models/segformer/`）
-- **Backend**: `pipeline/segformer_infer.py`（遅延シングルトン model、up-sample argmax → 各クラスの `findContours` → polygon + coverage 統計）
-- **Endpoints**:
-  - `GET /analyze/segformer/status` → checkpoint の有無を返す（UI の state 判定用）
-  - `POST /images/{id}/analyze/segformer` → `analyses(kind='segformer_tissue')` 行 + BackgroundTasks + `asyncio.to_thread`
-- **UI**: `SegFormerPanel` がクラス別の面積 (µm² or px²) + coverage 比率を表でまとめつつ、タイソークラス色の透過 polygon を画像にオーバーレイ
-- **運用**: checkpoint 未配置時は UI が「checkpoint 未配置」と表示、backend は 503 を返す（Cellpose / 基本計測は独立で動作）
+## 精度検証（PR #7）
 
-## Cellpose 細胞検出（PR #5b）
+旧手動ツールで作った `measure_results.xlsx` を ground truth として、basic_measurement の出力との誤差レポートを生成。
 
-Cellpose 3 の cyto3 generalist モデルを使って、1 クリックで細胞単位のセグメンテーション（細胞数・平均面積・個別ポリゴン）が取れる。
+```bash
+# 0) ホスト側 Python に openpyxl + httpx を入れる（初回のみ）。
+#    Python 3.11 または 3.12 が必須（numpy<2.0 固定のため 3.13 はまだ未対応。
+#    macOS CLT の 3.9 もダメ）。PEP 668 対策で venv は必須。
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -e 'backend[dev]'
+# もしくは最小構成: pip install openpyxl httpx
 
-- **Backend**: `pipeline/cellpose_infer.py`（遅延シングルトンで model 読み込み、最大辺 1024px に down-sample → 原座標にスケール戻し）
-- **Endpoint**: `POST /images/{id}/analyze/cellpose` → `analyses` 行に `kind='cellpose_cells'`, `status='running'` で insert し、FastAPI BackgroundTasks で推論本体を走らせる
-- **Polling**: フロントは `GET /analyses/{id}` を 2.5s 間隔でポーリング、`done` / `error` で停止
-- **UI**: 画像詳細ページに「Cellpose 細胞検出」パネル。完了後は細胞数・平均/中央面積（スケール有りなら µm²）と、検出ポリゴンを透過 SVG で重ねた overlay を表示
-- **Docker**: PyTorch (CPU wheel) + Cellpose はランタイム image のみに載せる (`pyproject` の `ml` extra)。CI の lint/type/test レイヤは軽いまま
-- **モデルキャッシュ**: `plants-ml-cache` 名前付きボリュームで `/root/.cellpose` を永続化（初回推論時に ~26MB の cyto3 重みを DL）
+# 1) stack を起動 + 検証対象画像を UI からアップ
+make up
 
-M2 Mac（CPU）で 1 枚 30〜60 秒程度。GPU (CUDA/MPS) があれば数秒。
+# 2) 認証は 2 通り：
+#    (a) password 持ちアカウント → メール指定（プロンプトで入力）
+VALIDATE_EMAIL="you@example.com" make validate
+#    (b) magic-link アカウントは password が無いので、ブラウザ DevTools
+#        → Application → Local Storage → sb-...-auth-token から
+#        access_token を取り出して環境変数で渡す
+VALIDATE_TOKEN="eyJhbGciOi..." make validate
 
-## 学習データエクスポート（PR #5a）
+# → outputs/validation_report.md + .json が cwd 直下に生成される
+```
 
-PR #4 で保存したポリゴンアノテーションをラスタライズし、SegFormer / DeepLab などの semantic-segmentation トレーナに直接流し込める形で取り出せる。
+> `make validate` は既定で `python3` を使う。`python3 --version` が 3.11 未満（macOS CLT の 3.9）または 3.13 以上（Homebrew の最新）の場合は `make validate PYTHON=python3.12` のように上書きする。`VALIDATE_EMAIL` / `VALIDATE_TOKEN` は `.env` に書いても OK（inline env var と同様に拾う）。
 
-- **マスク形式**: `uint8` の 1 チャネル PNG、0 = 背景、1..10 がクラスインデックス（`backend/app/pipeline/rasterize.py::CLASS_INDEX`）
-- **重なり**: 後から描いたポリゴンが上書き（last-write-wins）
-- **エンドポイント**
-  - `GET /images/{id}/mask.png` — 1 枚の最新マスクを PNG で返す（エディタ画面から「マスクをダウンロード」で取得可）
-  - `GET /training/export.zip[?include_unlabelled=true]` — 閲覧可能な全画像を `images/<uuid>.<ext>` + `masks/<uuid>.png` で束ね、`classes.json`（クラスインデックス定義）と `index.json`（画像ごとのメタ情報）を同梱
-- **認可**: エンドポイントは caller の Supabase JWT を受け取り、RLS 経由でフィルタ（他人の private 画像は出てこない）
-- ダッシュボード右上の「学習データ zip」ボタンで一括ダウンロード
+`make validate` は `.env` を自動 source するので `ANON_KEY` 等は事前 export 不要。スクリプトは N 行に拡張可能。`測定タイプ=Distance` `メモ=厚さ` → `leaf_mean_thickness_um`、`メモ=葉肉の厚さ` → `leaf_median_thickness_um` のマッピングは `--metric-map '{...}'` で上書き可能。`維管束面積` は basic_measurement では出ないので N/A（SegFormer の xylem polygon 面積で別途比較）。
 
 ## データモデル / 権限
 
-- `public.profiles` — `auth.users` と 1:1（初回サインインで自動作成）
-- `public.images` — 画像メタデータ。`visibility` は `private / lab / public` の 3 値
-- Row Level Security で以下を強制:
-  - `private`: 所有者のみ読み書き
-  - `lab`: ログイン済ユーザー全員が read 可、書き込みは所有者のみ
-  - `public`: 未ログインでも read 可
-- Storage バケット `images` にも同じ可視性ロジックを `storage.objects` の RLS で適用
+| テーブル | 用途 | RLS 概要 |
+|---|---|---|
+| `profiles` | `auth.users` と 1:1 | read = authenticated 全員 / update = 自分 |
+| `images` | 画像メタ | private = 所有者 / lab = authenticated / public = anon |
+| `analyses` | パイプライン結果 (basic / cellpose / segformer / water_path) | image RLS に委譲 |
+| `annotations` | 手動ポリゴン | 画像が読めれば read、書き込みは所有者 |
+
+Storage バケット `images` にも同じ可視性を `storage.objects` の RLS で適用。
 
 ## 認証フロー
 
-1. `/login` でメールアドレスを入力 → マジックリンク送信
-2. 開発環境では SMTP 未設定のため、`supabase-auth` コンテナのログにリンクが出力される
-   ```bash
-   docker compose logs supabase-auth | grep -i "confirm your signup\|magic link"
-   ```
-3. リンクをクリック → `/auth/callback` でコード交換 → `/dashboard`
+1. `/login` でメールアドレスを入れる → magic link 送信
+2. 開発環境では SMTP 未設定なので `make logs-auth` で出力されたリンクを直接踏む
+3. `/auth/callback` で code 交換 → `/dashboard`
+
+## 運用 / デプロイのヒント
+
+- 研究室サーバへ持っていく場合は `.env` の `SITE_URL` / `NEXT_PUBLIC_SITE_URL` / `SUPABASE_PUBLIC_URL` / `BACKEND_CORS_ORIGINS` をその FQDN に書き換え、リバースプロキシ（caddy / nginx）で 3000/8001/8000/3001 を集約する
+- 本物の SMTP を使うなら `.env` の `SMTP_*` を埋める（`make restart` で反映）
+- GPU が使える環境なら Cellpose / SegFormer の `gpu=False` を `True` にして再ビルド（数倍速くなる）
+- Supabase Cloud に移行する場合は `SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_URL` / `ANON_KEY` / `SERVICE_ROLE_KEY` を Cloud のものに差し替えるだけで済む（self-host と同じ API contract）
+
+## ディレクトリ構成
+
+```
+tools_for_plants_research/
+├── Makefile                              # make help で全ターゲット
+├── CHANGELOG.md
+├── docker-compose.yml                    # backend + frontend
+├── docker-compose.supabase.yml           # Supabase self-host 一式
+├── .env.example
+├── backend/                              # FastAPI
+│   ├── app/
+│   │   ├── api/                          # REST ルート
+│   │   ├── core/                         # 設定 + Supabase httpx クライアント
+│   │   └── pipeline/                     # 解析パイプライン
+│   │       ├── classes.py                # 共通組織クラス
+│   │       ├── scale.py / segment.py / measure.py
+│   │       ├── rasterize.py
+│   │       ├── cellpose_infer.py
+│   │       ├── segformer_infer.py
+│   │       └── water_path.py
+│   └── tests/
+├── frontend/                             # Next.js 14
+│   ├── app/
+│   ├── components/                       # *Panel.tsx + AnnotationEditor + ...
+│   └── lib/
+│       ├── supabase/                     # client / server / middleware / types / public-url
+│       └── tissue-classes.ts             # ⇄ backend/app/pipeline/classes.py
+├── models/                               # SegFormer checkpoint 配置先（gitignore）
+│   └── README.md
+├── notebooks/
+│   └── segformer_train.ipynb
+├── scripts/
+│   ├── generate-jwt.sh
+│   └── validate_against_xlsx.py
+├── volumes/
+│   ├── api/kong.yml                      # Kong ルーティング + CORS
+│   └── db/init/                          # initdb 用 SQL
+└── docs/
+```
 
 ## 将来計画
 
-- 研究室内の機材からクラウド（Supabase Storage）への直接アップロード
-  （`images.source` に `device:<serial>` を格納できるスキーマは本PRで用意済）
-- 外部公開時の OAuth プロバイダ追加
+- 研究室機材 → クラウドへの直接アップロード（`images.source = device:<serial>` の枠は確保済み）
+- 外部公開用の OAuth プロバイダ追加
+- FiPy による Darcy 流の本格 PDE シミュレーション
+- 生育条件メタデータ + 系統間比較ダッシュボード
+
+## ライセンス
+
+未定。研究室内利用想定。
