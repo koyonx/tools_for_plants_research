@@ -9,7 +9,7 @@ type Props = {
   canEdit: boolean;
 };
 
-const PS_TYPES: PhotosynthesisType[] = ["C3", "C4", "CAM", "unknown"];
+const PS_TYPES: PhotosynthesisType[] = ["C3", "C4", "C3-C4", "CAM", "unknown"];
 
 /**
  * Inline editor for study-grouping fields (species / photosynthesis_type /

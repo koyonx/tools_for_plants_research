@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
 
-const PS_TYPES: (PhotosynthesisType | "")[] = ["", "C3", "C4", "CAM", "unknown"];
+const PS_TYPES: (PhotosynthesisType | "")[] = ["", "C3", "C4", "C3-C4", "CAM", "unknown"];
 const PIPELINE_CHOICES: { key: string; label: string }[] = [
   { key: "basic_measurement", label: "基本計測" },
   { key: "segformer_tissue", label: "SegFormer 組織分割" },
@@ -48,7 +48,9 @@ export function ImageBatchPicker({ initial }: Props) {
   const [thumbs, setThumbs] = useState<Record<string, SignedUrlEntry>>({});
 
   // Refresh the image list after metadata edits on detail pages — keep it
-  // snappy by re-pulling on focus.
+  // snappy by re-pulling on focus.  Drop any `selected` IDs that have
+  // disappeared from the fresh list so kickoff doesn't send stale IDs
+  // that will fail the server-side owner check.
   useEffect(() => {
     const refetch = async () => {
       const { data } = await supabase
@@ -56,7 +58,14 @@ export function ImageBatchPicker({ initial }: Props) {
         .select("*")
         .order("created_at", { ascending: false })
         .limit(300);
-      if (data) setImages(data as ImageRow[]);
+      if (!data) return;
+      const rows = data as ImageRow[];
+      setImages(rows);
+      setSelected((prev) => {
+        const visible = new Set(rows.map((r) => r.id));
+        const next = new Set([...prev].filter((id) => visible.has(id)));
+        return next.size === prev.size ? prev : next;
+      });
     };
     const onFocus = () => void refetch();
     window.addEventListener("focus", onFocus);

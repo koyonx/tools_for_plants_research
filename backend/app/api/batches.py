@@ -44,6 +44,23 @@ PipelineKind = Literal[
     "water_path",
 ]
 
+# Topological execution order: later entries may depend on earlier ones.
+# (water_path needs segformer_tissue; basic_measurement provides scale
+# that water_path and segformer-µm-conversion can pick up.)  We sort by
+# this order regardless of what the client sent, so `Set`-iteration on
+# the frontend can't produce a broken schedule.
+_PIPELINE_EXEC_ORDER: tuple[str, ...] = (
+    "basic_measurement",
+    "cellpose_cells",
+    "segformer_tissue",
+    "water_path",
+)
+
+
+def _sort_pipeline_kinds(kinds: list[str]) -> list[str]:
+    rank = {k: i for i, k in enumerate(_PIPELINE_EXEC_ORDER)}
+    return sorted(kinds, key=lambda k: rank.get(k, 99))
+
 
 class BatchRequest(BaseModel):
     image_ids: list[str] = Field(..., min_length=1, max_length=500)
@@ -69,17 +86,6 @@ async def create_batch_run(
     jwt = _extract_jwt(authorization)
     sb = SupabaseAuthedClient(jwt)
 
-    # Validate each image exists + caller can write its analyses.
-    for image_id in payload.image_ids:
-        try:
-            image = await sb.get_image(image_id)
-        except SupabaseHttpError as e:
-            raise HTTPException(status_code=e.status, detail=e.detail) from e
-        if image is None:
-            raise HTTPException(
-                status_code=404, detail=f"image {image_id!r} not found or not accessible"
-            )
-
     # Caller identity — owner_id of the batch_runs row must match auth.uid.
     try:
         me = await sb.get_user_identity()
@@ -89,13 +95,58 @@ async def create_batch_run(
     if not owner_id:
         raise HTTPException(status_code=401, detail="unable to resolve caller identity")
 
-    total = len(payload.image_ids) * len(payload.pipeline_kinds)
+    # Validate each image exists AND the caller owns it.  read-access
+    # (lab / public visibility) isn't enough because `analyses` inserts
+    # are RLS-restricted to the image owner — without this check, lab /
+    # public images owned by other users would be silently queued and
+    # fail in the background task.
+    for image_id in payload.image_ids:
+        try:
+            image = await sb.get_image(image_id)
+        except SupabaseHttpError as e:
+            raise HTTPException(status_code=e.status, detail=e.detail) from e
+        if image is None:
+            raise HTTPException(
+                status_code=404, detail=f"image {image_id!r} not found or not accessible"
+            )
+        if str(image.get("owner_id")) != str(owner_id):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"image {image_id!r} is not owned by the caller; "
+                    "batch analyses can only run against images you uploaded."
+                ),
+            )
+
+    # Sort pipeline kinds by the topological execution order so that
+    # dependent pipelines (water_path → segformer_tissue) always run
+    # after their prerequisites, regardless of how the client ordered
+    # them (JS `Set` insertion order depends on checkbox click order).
+    sorted_kinds = _sort_pipeline_kinds(list(payload.pipeline_kinds))
+
+    # If segformer_tissue is requested, fail-fast if the checkpoint
+    # isn't ready — otherwise a 500-image batch burns 500 failed runs
+    # with opaque load errors before the user notices.
+    if "segformer_tissue" in sorted_kinds:
+        from app.api.segformer import DEFAULT_MODEL_DIR, _checkpoint_is_usable
+
+        if not _checkpoint_is_usable(DEFAULT_MODEL_DIR):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "segformer_tissue requested but the checkpoint at "
+                    f"{DEFAULT_MODEL_DIR} is missing or incomplete. "
+                    "See models/README.md."
+                ),
+            )
+
+    total = len(payload.image_ids) * len(sorted_kinds)
     try:
         batch = await sb.insert_batch_run(
             {
                 "owner_id": owner_id,
                 "label": payload.label,
-                "pipeline_kinds": list(payload.pipeline_kinds),
+                "pipeline_kinds": sorted_kinds,
                 "image_ids": payload.image_ids,
                 "status": "running",
                 "total": total,
@@ -113,7 +164,7 @@ async def create_batch_run(
         jwt,
         batch["id"],
         payload.image_ids,
-        list(payload.pipeline_kinds),
+        sorted_kinds,
         {
             "reference_um": payload.reference_um,
             "max_side_px": payload.max_side_px,
@@ -192,12 +243,16 @@ async def _run_pipeline(
         return str(row["id"])
 
     if kind == "cellpose_cells":
-        from app.pipeline.cellpose_infer import detect_cells
+        # Keep the `parameters` blob identical to the per-image endpoint
+        # (app/api/cellpose.py) so downstream analytics can join batch
+        # and per-image runs without knowing their provenance.
+        from app.pipeline.cellpose_infer import DEFAULT_MODEL, detect_cells
 
+        cp_max_side = int(params["max_side_px"])
         cp_result = await asyncio.to_thread(
             detect_cells,
             image_bgr,
-            max_side_px=int(params["max_side_px"]),
+            max_side_px=cp_max_side,
         )
         cp_blob = cp_result.to_dict()
         cp_blob["image_shape"] = {
@@ -209,19 +264,25 @@ async def _run_pipeline(
                 "image_id": image_id,
                 "kind": kind,
                 "status": "done",
-                "parameters": {"max_side_px": int(params["max_side_px"])},
+                "parameters": {
+                    "max_side_px": cp_max_side,
+                    "diameter": None,
+                    "model_name": DEFAULT_MODEL,
+                },
                 "result": cp_blob,
             }
         )
         return str(row["id"])
 
     if kind == "segformer_tissue":
+        from app.api.segformer import DEFAULT_MODEL_DIR
         from app.pipeline.segformer_infer import detect_tissue
 
+        seg_max_side = int(params["max_side_px"])
         seg_result = await asyncio.to_thread(
             detect_tissue,
             image_bgr,
-            max_side_px=int(params["max_side_px"]),
+            max_side_px=seg_max_side,
         )
         seg_blob = seg_result.to_dict()
         seg_blob["image_shape"] = {
@@ -233,7 +294,10 @@ async def _run_pipeline(
                 "image_id": image_id,
                 "kind": kind,
                 "status": "done",
-                "parameters": {"max_side_px": int(params["max_side_px"])},
+                "parameters": {
+                    "max_side_px": seg_max_side,
+                    "model_dir": DEFAULT_MODEL_DIR,
+                },
                 "result": seg_blob,
             }
         )

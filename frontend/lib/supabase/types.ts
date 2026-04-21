@@ -3,7 +3,7 @@
 
 export type Visibility = "private" | "lab" | "public";
 
-export type PhotosynthesisType = "C3" | "C4" | "CAM" | "unknown";
+export type PhotosynthesisType = "C3" | "C4" | "C3-C4" | "CAM" | "unknown";
 
 export type ImageRow = {
   id: string;

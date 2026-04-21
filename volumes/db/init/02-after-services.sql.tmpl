@@ -198,7 +198,10 @@ ALTER TABLE public.images ADD COLUMN IF NOT EXISTS captured_at        timestampt
 -- don't break).  Drop + re-add for PG < 18 that lacks IF NOT EXISTS.
 ALTER TABLE public.images DROP CONSTRAINT IF EXISTS images_photosynthesis_type_check;
 ALTER TABLE public.images ADD CONSTRAINT images_photosynthesis_type_check CHECK (
-  photosynthesis_type IS NULL OR photosynthesis_type IN ('C3', 'C4', 'CAM', 'unknown')
+  -- `C3-C4` covers intermediate species (e.g. Flaveria, Portulaca) where
+  -- collapsing to C3 or C4 would erase the scientifically interesting case.
+  photosynthesis_type IS NULL
+  OR photosynthesis_type IN ('C3', 'C4', 'C3-C4', 'CAM', 'unknown')
 );
 
 CREATE INDEX IF NOT EXISTS images_species_idx              ON public.images(species);
