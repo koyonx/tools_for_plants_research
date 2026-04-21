@@ -241,31 +241,36 @@ function WaterPathOverlay({
         aria-hidden
       >
         <title>shortest paths from xylem to stomata</title>
-        {result.paths.map((p, i) => (
-          <g key={`p${i}-${p.centroid[0].toFixed(1)}`}>
-            <line
-              x1={p.nearest_source[0]}
-              y1={p.nearest_source[1]}
-              x2={p.centroid[0]}
-              y2={p.centroid[1]}
-              stroke="rgba(56, 189, 248, 0.85)"
-              strokeWidth={strokePx}
-              strokeDasharray={`${strokePx * 4} ${strokePx * 3}`}
-            />
-            <circle
-              cx={p.nearest_source[0]}
-              cy={p.nearest_source[1]}
-              r={sourceR}
-              fill="rgba(29, 78, 216, 0.95)"
-            />
-            <circle
-              cx={p.centroid[0]}
-              cy={p.centroid[1]}
-              r={sinkR}
-              fill="rgba(236, 72, 153, 0.9)"
-            />
-          </g>
-        ))}
+        {result.paths.map((p, i) => {
+          // Prefer the gradient-descent polyline; fall back to a
+          // straight line for legacy result rows that lack `route`.
+          const points =
+            p.route && p.route.length >= 2
+              ? p.route.map(([x, y]) => `${x},${y}`).join(" ")
+              : `${p.centroid[0]},${p.centroid[1]} ${p.nearest_source[0]},${p.nearest_source[1]}`;
+          return (
+            <g key={`p${i}-${p.centroid[0].toFixed(1)}`}>
+              <polyline
+                points={points}
+                fill="none"
+                stroke="rgba(56, 189, 248, 0.9)"
+                strokeWidth={strokePx}
+              />
+              <circle
+                cx={p.nearest_source[0]}
+                cy={p.nearest_source[1]}
+                r={sourceR}
+                fill="rgba(29, 78, 216, 0.95)"
+              />
+              <circle
+                cx={p.centroid[0]}
+                cy={p.centroid[1]}
+                r={sinkR}
+                fill="rgba(236, 72, 153, 0.9)"
+              />
+            </g>
+          );
+        })}
       </svg>
     </div>
   );

@@ -60,7 +60,14 @@ class StomatumPath:
     travel_time: float
     travel_time_um: float | None
     straight_line_um: float | None
+    # First xylem source pixel reached by the gradient-descent trace, in
+    # original-image coordinates.
     nearest_source: list[float]
+    # Polyline traced down the gradient of the FMM travel-time field, in
+    # original-image coordinates ([[x, y], ...]).  Always at least
+    # `[centroid, nearest_source]`; for tissue maps with detours this
+    # carries the actual minimum-resistance route.
+    route: list[list[float]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -237,21 +244,55 @@ def compute_water_path(
         cost = np.where(cls_mask > 0, resistance.get(cls_key, BACKGROUND_COST), cost)
 
     # Sources are at zero level; everything else is +1.  scikit-fmm computes
-    # arrival time by integrating the cost (slowness) along the steepest
-    # descent of the level set.
+    # arrival time by integrating cost (slowness) along the steepest
+    # descent of the level set.  Pass `dx=inv_factor` so the grid spacing
+    # is in *original-image* pixel units — that way travel-time numbers
+    # are independent of the chosen `max_side_px` down-sample factor.
     import skfmm
 
     phi = np.ones_like(cost, dtype=np.float64)
     phi[source_mask > 0] = -1.0
-    travel_time = skfmm.travel_time(phi, speed=1.0 / np.maximum(cost, 1e-3))
-
-    # Stomata centroids → travel time samples.  Use the original-grid
-    # centroids, then convert to the down-sampled grid.
-    sink_polygons = [
-        p for p in polygons if p.get("class_key") == "stomata"
-    ]
-    paths: list[StomatumPath] = []
+    speed = 1.0 / np.maximum(cost, 1e-3)
+    travel_time = skfmm.travel_time(phi, speed=speed, dx=inv_factor)
     arrival_finite = np.where(np.isfinite(travel_time), travel_time, np.nan)
+
+    # Pre-compute the gradient for back-tracing the FMM path.  The fastest
+    # route from any sink to its source is the steepest descent of
+    # travel_time, so we walk in the -gradient direction one pixel at a
+    # time until we land on the source mask (or hit a step budget).
+    grad_y, grad_x = np.gradient(np.where(np.isfinite(travel_time), travel_time, 0.0))
+
+    def _trace_route(
+        start_y: int, start_x: int, max_steps: int = 4096
+    ) -> list[tuple[float, float]]:
+        """Gradient-descent polyline (downsampled-grid coords) from a
+        sink centroid back to the source mask."""
+        y, x = float(start_y), float(start_x)
+        route_ds: list[tuple[float, float]] = [(y, x)]
+        for _ in range(max_steps):
+            iy, ix = round(y), round(x)
+            iy = min(max(iy, 0), h - 1)
+            ix = min(max(ix, 0), w - 1)
+            if source_mask[iy, ix] > 0:
+                route_ds.append((float(iy), float(ix)))
+                break
+            dy = -float(grad_y[iy, ix])
+            dx_ = -float(grad_x[iy, ix])
+            norm = (dy * dy + dx_ * dx_) ** 0.5
+            if norm < 1e-9:
+                # flat plateau — bail out instead of looping forever
+                break
+            y += dy / norm
+            x += dx_ / norm
+            if not (0 <= y < h and 0 <= x < w):
+                break
+            # Sample sparsely so the polyline isn't pixel-by-pixel huge.
+            if len(route_ds) % 4 == 0:
+                route_ds.append((y, x))
+        return route_ds
+
+    sink_polygons = [p for p in polygons if p.get("class_key") == "stomata"]
+    paths: list[StomatumPath] = []
     for poly in sink_polygons:
         coords = poly.get("polygon")
         if not isinstance(coords, list) or len(coords) < 3:
@@ -266,26 +307,38 @@ def compute_water_path(
         tt = float(arrival_finite[cy_ds, cx_ds])
         if not np.isfinite(tt):
             continue
-        # nearest source (straight-line) for comparison
-        src_pixels = np.argwhere(source_mask > 0)  # (y, x) pairs
-        if src_pixels.size == 0:
-            continue
-        diffs = src_pixels.astype(np.float64) - np.array([cy_ds, cx_ds])
-        idx = int(np.argmin(np.sum(diffs * diffs, axis=1)))
-        nearest_y, nearest_x = src_pixels[idx]
-        nearest_orig = [float(nearest_x) * inv_factor, float(nearest_y) * inv_factor]
+
+        route_ds = _trace_route(cy_ds, cx_ds)
+        # Convert back to original-image coords + (x, y) order for the UI.
+        route_orig: list[list[float]] = [
+            [float(rx) * inv_factor, float(ry) * inv_factor] for ry, rx in route_ds
+        ]
+        # Endpoint of the FMM trace = the source pixel actually reached;
+        # this replaces the old straight-line "nearest source".
+        end_y, end_x = route_ds[-1]
+        nearest_orig = [float(end_x) * inv_factor, float(end_y) * inv_factor]
+
+        # Straight-line distance to the same endpoint, for comparison.
         straight_um = (
-            float(np.linalg.norm([nearest_x - cx_ds, nearest_y - cy_ds]))
+            float(np.linalg.norm([end_x - cx_ds, end_y - cy_ds]))
             * inv_factor
-            * (um_per_px if um_per_px else 1.0)
-        ) if um_per_px else None
+            * um_per_px
+            if um_per_px
+            else None
+        )
+        # tt is already in original-pixel-cost units thanks to dx=inv_factor;
+        # multiply by µm/px to get a µm-cost surrogate (no longer applies
+        # the down-sample factor manually).
+        tt_um = tt * um_per_px if um_per_px else None
+
         paths.append(
             StomatumPath(
                 centroid=[cx_orig, cy_orig],
                 travel_time=tt,
-                travel_time_um=tt * inv_factor * um_per_px if um_per_px else None,
+                travel_time_um=tt_um,
                 straight_line_um=straight_um,
                 nearest_source=nearest_orig,
+                route=route_orig,
             )
         )
 

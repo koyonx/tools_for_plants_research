@@ -90,6 +90,10 @@ export type StomatumPath = {
   travel_time_um: number | null;
   straight_line_um: number | null;
   nearest_source: [number, number];
+  // Polyline traced down the FMM travel-time gradient (original-image
+  // coords).  Frontend renders it instead of the straight-line link
+  // when present.
+  route?: [number, number][];
 };
 
 export type WaterPathResult = {
