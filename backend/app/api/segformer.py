@@ -32,7 +32,11 @@ DEFAULT_MODEL_DIR = os.environ.get("PLANTS_SEGFORMER_DIR", "/models/segformer")
 
 class SegFormerRequest(BaseModel):
     max_side_px: int = Field(default=1024, gt=0, le=4096)
-    model_dir: str | None = Field(default=None, description="override PLANTS_SEGFORMER_DIR")
+    # NB: there is intentionally no `model_dir` override.  The checkpoint
+    # location is operator-configured via `PLANTS_SEGFORMER_DIR` so that
+    # any authenticated image owner cannot probe arbitrary server paths
+    # or coerce the backend into loading weights from outside the
+    # `/models/segformer` mount.
 
 
 def _extract_jwt(authorization: str | None) -> str:
@@ -41,19 +45,19 @@ def _extract_jwt(authorization: str | None) -> str:
     return authorization.split(" ", 1)[1]
 
 
-def _resolve_model_dir(override: str | None) -> str:
-    return override or DEFAULT_MODEL_DIR
-
-
 def _checkpoint_is_usable(path: str) -> bool:
-    """True iff `path` contains everything SegformerForSemanticSegmentation
-    needs to load: a config + at least one weights file.  Keeps the probe
-    and the POST validation in lock-step so the UI never queues a run
-    that's doomed to fail in the background task."""
+    """True iff `path` contains everything we'll need to actually run
+    inference: a config, a processor config, and at least one weights
+    file.  Keeps the probe and the POST validation in lock-step so the
+    UI never queues a run that's doomed to fail in the background task
+    (e.g. `SegformerImageProcessor.from_pretrained` will raise on a
+    missing `preprocessor_config.json`)."""
     p = Path(path)
     if not p.exists():
         return False
     if not (p / "config.json").exists():
+        return False
+    if not (p / "preprocessor_config.json").exists():
         return False
     return any((p / name).exists() for name in ("model.safetensors", "pytorch_model.bin"))
 
@@ -61,10 +65,9 @@ def _checkpoint_is_usable(path: str) -> bool:
 @router.get("/analyze/segformer/status")
 def segformer_status() -> dict[str, Any]:
     """Quick probe for the frontend — reports whether a checkpoint is present."""
-    path = _resolve_model_dir(None)
     return {
-        "model_dir": path,
-        "available": _checkpoint_is_usable(path),
+        "model_dir": DEFAULT_MODEL_DIR,
+        "available": _checkpoint_is_usable(DEFAULT_MODEL_DIR),
     }
 
 
@@ -78,13 +81,14 @@ async def kick_off_segformer(
     jwt = _extract_jwt(authorization)
     sb = SupabaseAuthedClient(jwt)
 
-    model_dir = _resolve_model_dir(payload.model_dir)
+    model_dir = DEFAULT_MODEL_DIR
     if not _checkpoint_is_usable(model_dir):
         raise HTTPException(
             status_code=503,
             detail=(
                 f"segformer checkpoint not usable at {model_dir}. "
-                "Expected config.json plus model.safetensors or pytorch_model.bin. "
+                "Expected config.json + preprocessor_config.json + "
+                "model.safetensors or pytorch_model.bin. "
                 "See models/README.md for how to train + drop-in weights."
             ),
         )
