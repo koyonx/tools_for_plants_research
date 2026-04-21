@@ -262,20 +262,24 @@ def compute_water_path(
     # time until we land on the source mask (or hit a step budget).
     grad_y, grad_x = np.gradient(np.where(np.isfinite(travel_time), travel_time, 0.0))
 
+    sample_every = 4
+
     def _trace_route(
         start_y: int, start_x: int, max_steps: int = 4096
     ) -> list[tuple[float, float]]:
         """Gradient-descent polyline (downsampled-grid coords) from a
-        sink centroid back to the source mask."""
+        sink centroid back to the source mask.  Samples every Nth step
+        so the polyline stays compact even on long routes."""
         y, x = float(start_y), float(start_x)
         route_ds: list[tuple[float, float]] = [(y, x)]
-        for _ in range(max_steps):
+        last_iy, last_ix = -1, -1
+        for step in range(1, max_steps + 1):
             iy, ix = round(y), round(x)
             iy = min(max(iy, 0), h - 1)
             ix = min(max(ix, 0), w - 1)
             if source_mask[iy, ix] > 0:
                 route_ds.append((float(iy), float(ix)))
-                break
+                return route_ds
             dy = -float(grad_y[iy, ix])
             dx_ = -float(grad_x[iy, ix])
             norm = (dy * dy + dx_ * dx_) ** 0.5
@@ -286,9 +290,17 @@ def compute_water_path(
             x += dx_ / norm
             if not (0 <= y < h and 0 <= x < w):
                 break
-            # Sample sparsely so the polyline isn't pixel-by-pixel huge.
-            if len(route_ds) % 4 == 0:
+            # Sample every SAMPLE_EVERY steps, but always include
+            # changes when we move to a new pixel cell so the polyline
+            # has at least one intermediate vertex on short routes.
+            if step % sample_every == 0 and (iy, ix) != (last_iy, last_ix):
                 route_ds.append((y, x))
+                last_iy, last_ix = iy, ix
+
+        # Trace ended without landing on a source (plateau or budget).
+        # Return whatever we have — the caller resolves a fallback
+        # source endpoint via Euclidean-nearest below so `nearest_source`
+        # is never the sink itself.
         return route_ds
 
     sink_polygons = [p for p in polygons if p.get("class_key") == "stomata"]
@@ -309,16 +321,33 @@ def compute_water_path(
             continue
 
         route_ds = _trace_route(cy_ds, cx_ds)
+
+        # If the trace bailed before reaching the source mask, snap the
+        # endpoint to the Euclidean-nearest source pixel and append it
+        # so `route` is always sink → … → source and `nearest_source`
+        # is never the sink itself.
+        end_y_int = min(max(round(route_ds[-1][0]), 0), h - 1)
+        end_x_int = min(max(round(route_ds[-1][1]), 0), w - 1)
+        if source_mask[end_y_int, end_x_int] == 0:
+            src_pixels = np.argwhere(source_mask > 0)
+            if src_pixels.size > 0:
+                diffs = src_pixels.astype(np.float64) - np.array(
+                    [route_ds[-1][0], route_ds[-1][1]]
+                )
+                idx = int(np.argmin(np.sum(diffs * diffs, axis=1)))
+                snap_y, snap_x = src_pixels[idx]
+                route_ds.append((float(snap_y), float(snap_x)))
+
         # Convert back to original-image coords + (x, y) order for the UI.
         route_orig: list[list[float]] = [
             [float(rx) * inv_factor, float(ry) * inv_factor] for ry, rx in route_ds
         ]
-        # Endpoint of the FMM trace = the source pixel actually reached;
-        # this replaces the old straight-line "nearest source".
+        # Endpoint of the FMM trace = the source pixel actually reached.
         end_y, end_x = route_ds[-1]
         nearest_orig = [float(end_x) * inv_factor, float(end_y) * inv_factor]
 
-        # Straight-line distance to the same endpoint, for comparison.
+        # Straight-line distance to the same endpoint, for comparison
+        # against the FMM travel cost.
         straight_um = (
             float(np.linalg.norm([end_x - cx_ds, end_y - cy_ds]))
             * inv_factor
