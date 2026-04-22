@@ -19,9 +19,7 @@ from __future__ import annotations
 
 import io
 import json
-import math
 from datetime import datetime
-from typing import Any
 
 import pytest
 from openpyxl import Workbook
@@ -247,10 +245,6 @@ def test_multi_sheet_workbook_picks_highest_scoring_sheet() -> None:
     session = parse_xlsx(buf.getvalue())
     assert len(session.points) == 6
     assert session.instrument == "li_6800"
-
-
-def _is_finite(x: Any) -> bool:
-    return isinstance(x, float) and math.isfinite(x)
 
 
 def test_duplicate_alias_columns_first_wins_loser_in_raw() -> None:

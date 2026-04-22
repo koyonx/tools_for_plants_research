@@ -292,6 +292,18 @@ ALTER TABLE public.gas_exchange_sessions
     instrument IN ('li_6400', 'li_6800', 'generic_csv', 'unknown')
   );
 
+-- source_format is documented as 'xlsx' | 'csv' | 'tsv' | 'unknown'
+-- in the parser; a direct PostgREST client could otherwise persist
+-- arbitrary values and the frontend switch on source_format would
+-- silently break.  Enforce the same taxonomy at the DB level to
+-- match the instrument constraint above.
+ALTER TABLE public.gas_exchange_sessions
+  DROP CONSTRAINT IF EXISTS gas_exchange_sessions_source_format_check;
+ALTER TABLE public.gas_exchange_sessions
+  ADD CONSTRAINT gas_exchange_sessions_source_format_check CHECK (
+    source_format IN ('xlsx', 'csv', 'tsv', 'unknown')
+  );
+
 ALTER TABLE public.gas_exchange_sessions
   DROP CONSTRAINT IF EXISTS gas_exchange_sessions_photosynthesis_type_check;
 ALTER TABLE public.gas_exchange_sessions
@@ -405,3 +417,37 @@ CREATE POLICY "gas_exchange_points owner write"
   TO authenticated
   USING (owner_id = auth.uid())
   WITH CHECK (owner_id = auth.uid());
+
+-- Keep gas_exchange_sessions.point_count in sync with the actual row
+-- count.  RLS allows owners to insert/update/delete points directly
+-- via PostgREST (without going through the upload endpoint), so the
+-- counter would otherwise drift away from the truth.  The trigger
+-- runs as table-owner and bypasses RLS on the parent session UPDATE
+-- via SECURITY DEFINER — necessary because the row owner who deleted
+-- a point might not have write access to the session in any
+-- hypothetical future RLS variant, and the count must update either way.
+CREATE OR REPLACE FUNCTION public.gas_exchange_points_recount() RETURNS trigger
+  LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  affected uuid;
+BEGIN
+  affected := COALESCE(NEW.session_id, OLD.session_id);
+  IF affected IS NULL THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
+  UPDATE public.gas_exchange_sessions
+     SET point_count = (
+       SELECT COUNT(*) FROM public.gas_exchange_points
+        WHERE session_id = affected
+     )
+   WHERE id = affected;
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+DROP TRIGGER IF EXISTS gas_exchange_points_recount_trg
+  ON public.gas_exchange_points;
+CREATE TRIGGER gas_exchange_points_recount_trg
+  AFTER INSERT OR DELETE OR UPDATE OF session_id
+  ON public.gas_exchange_points
+  FOR EACH ROW EXECUTE FUNCTION public.gas_exchange_points_recount();
