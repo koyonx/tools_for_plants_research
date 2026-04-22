@@ -127,6 +127,104 @@ class SupabaseAuthedClient:
         rows: list[dict[str, Any]] = response.json()
         return rows[0] if rows else None
 
+    # ---- gas_exchange (PR #11) ------------------------------------------
+    async def insert_gas_exchange_session(self, row: dict[str, Any]) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            "/rest/v1/gas_exchange_sessions",
+            headers={"Prefer": "return=representation", "Content-Type": "application/json"},
+            json=row,
+        )
+        return cast(dict[str, Any], response.json()[0])
+
+    async def insert_gas_exchange_points(
+        self, rows: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Bulk-insert points.  Empty list → no-op (PostgREST rejects
+        zero-row POST bodies)."""
+        if not rows:
+            return []
+        response = await self._request(
+            "POST",
+            "/rest/v1/gas_exchange_points",
+            headers={"Prefer": "return=representation", "Content-Type": "application/json"},
+            json=rows,
+        )
+        out: list[dict[str, Any]] = response.json()
+        return out
+
+    async def list_gas_exchange_sessions(
+        self,
+        *,
+        plant_id: str | None = None,
+        species: str | None = None,
+        photosynthesis_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """RLS-filtered session list, ordered newest-first."""
+        params: dict[str, str] = {
+            "select": "*",
+            "order": "captured_at.desc.nullslast,created_at.desc",
+        }
+        if plant_id:
+            params["plant_id"] = f"eq.{plant_id}"
+        if species:
+            params["species"] = f"eq.{species}"
+        if photosynthesis_type:
+            params["photosynthesis_type"] = f"eq.{photosynthesis_type}"
+        response = await self._request("GET", "/rest/v1/gas_exchange_sessions", params=params)
+        rows: list[dict[str, Any]] = response.json()
+        return rows
+
+    async def get_gas_exchange_session(self, session_id: str) -> dict[str, Any] | None:
+        response = await self._request(
+            "GET",
+            "/rest/v1/gas_exchange_sessions",
+            params={"id": f"eq.{session_id}", "select": "*"},
+        )
+        rows: list[dict[str, Any]] = response.json()
+        return rows[0] if rows else None
+
+    async def list_gas_exchange_points(
+        self,
+        session_id: str,
+        *,
+        page_size: int = 1000,
+        max_rows: int = 20_000,
+    ) -> list[dict[str, Any]]:
+        """All points for a session, ordered by obs_index.  Walks Range
+        headers like list_analyses since LI-COR A-Ci curves with many
+        steps can produce >1000 observations per session."""
+        params = {
+            "select": "*",
+            "session_id": f"eq.{session_id}",
+            "order": "obs_index.asc",
+        }
+        all_rows: list[dict[str, Any]] = []
+        offset = 0
+        while offset < max_rows:
+            headers = {
+                "Range-Unit": "items",
+                "Range": f"{offset}-{offset + page_size - 1}",
+            }
+            response = await self._request(
+                "GET", "/rest/v1/gas_exchange_points", params=params, headers=headers
+            )
+            page: list[dict[str, Any]] = response.json()
+            if not page:
+                break
+            all_rows.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+        return all_rows
+
+    async def delete_gas_exchange_session(self, session_id: str) -> None:
+        await self._request(
+            "DELETE",
+            "/rest/v1/gas_exchange_sessions",
+            params={"id": f"eq.{session_id}"},
+        )
+
     async def list_images_filtered(
         self,
         filters: dict[str, str] | None = None,

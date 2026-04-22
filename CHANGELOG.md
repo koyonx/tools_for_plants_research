@@ -6,7 +6,37 @@ hasn't tagged a release yet, so everything below is on `main`.
 
 ## [Unreleased]
 
-### PR #10 — CO2 diffusion morphometrics (current)
+### PR #11 — LI-COR ガス交換ファイル取り込み (current)
+- `backend/app/pipeline/licor_parse.py`: 機種・列レイアウト自動判定式
+  パーサー。LI-6400 / LI-6800 .xlsx 双方 + 任意の CSV/TSV を対応。
+  ヘッダー行は既知エイリアス (Photo/A/Cond/gsw/Ci/...) のスコア最高行
+  で検出、LI-6800 のユニット行を自動スキップ。未知列は `raw` JSON
+  に温存して将来の PDE / A-Ci フィットから再利用可能。NaN/Inf は
+  None に正規化して strict JSON 互換を保証。pandas 不採用、openpyxl
+  + 標準 csv のみ。
+- `backend/app/api/gas_exchange.py`: 4 つのエンドポイント
+  (`POST /gas-exchange/upload` 多パート、`GET /sessions` 絞込、
+  `GET /sessions/{id}` 点列付詳細、`DELETE /sessions/{id}`)。
+  25 MB 上限、所有者解決、insert失敗時のロールバック。
+- DB マイグレーション (`02-after-services.sql.tmpl`):
+  `gas_exchange_sessions` (instrument CHECK、photosynthesis_type CHECK、
+  RLS owner-only) + `gas_exchange_points` (owner_id 非正規化、
+  ON DELETE CASCADE、Range pagination 対応)。
+- `SupabaseAuthedClient` に gas_exchange CRUD ヘルパー追加、
+  list_gas_exchange_points は PostgREST 1000 行制限を回避する
+  Range header pagination。
+- 11 pytest ケース: LI-6400 TSV / LI-6800 xlsx / カスタム CSV /
+  ヘッダー行不在エラー / マジックバイト判定 / 旧 .xls 拒否 /
+  NaN-Inf 正規化 / 末尾空行 / Obs+timestamp 列の正しい抽出 /
+  複数シート最高スコア選択 / strict JSON ラウンドトリップ。
+- フロント: `/dashboard/gas-exchange` ページ (アップロード + 絞り込み
+  一覧 + 詳細 + A/Ci SVG 散布図 + 点列テーブル)、画像詳細ページに
+  同 plant_id のセッションへのクロスリンク、ヘッダーに「ガス交換」
+  リンク追加。
+- pyproject: `openpyxl>=3.1` を `dev` extra から本体 `dependencies`
+  に昇格 (アップロードエンドポイントで実行時必須)。
+
+### PR #10 — CO2 diffusion morphometrics
 - `backend/app/pipeline/morphometrics_co2.py`: classical-CV computation
   of the Evans & von Caemmerer / Tosens mesophyll-conductance inputs
   from existing SegFormer tissue polygons + Cellpose cell polygons.
