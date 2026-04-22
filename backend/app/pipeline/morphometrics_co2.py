@@ -4,17 +4,26 @@ Computes the scalar inputs that feed the Evans & von Caemmerer /
 Tosens et al. mesophyll-conductance model:
 
 * **S_mes/S** — mesophyll cell surface area exposed to the intercellular
-  air space, per unit leaf surface area.  In a 2-D cross-section the
-  standard proxy is `Σ(cell perimeter) / (leaf section length)` summed
-  over cells inside the mesophyll region (Thain 1983; Evans & Loreto
-  2000).  Dimensionless; higher in C3 mesophytes than in C4 NADP-ME
-  species with fewer exposed cells per µm leaf.
-* **S_c/S** — chloroplast surface area per unit leaf length, same
-  convention.  Fraction-of-a-cell metric that captures how much of the
-  cell periphery actually carries chloroplasts (critical for g_m).
-* **f_ias** — intercellular air space fraction within the mesophyll,
-  `1 - Σ(cell area) / (mesophyll area)`.  Captures the geometric
-  porosity that gas-phase CO2 traverses.
+  air space, per unit leaf surface area.  2-D cross-section proxy:
+  `L_mes,IAS / (leaf section length)`, where `L_mes,IAS` is the length
+  of the mesophyll-cell boundary adjacent to IAS (mesophyll ∧ ¬cells).
+  Computed as `cells_in_meso_mask ∧ dilate(ias_mask)` so shared
+  cell-cell walls and mesophyll-epidermis edges are excluded by
+  construction (Thain 1983; Evans & Loreto 2000).  Dimensionless;
+  higher in C3 mesophytes than in C4 NADP-ME species with fewer
+  exposed cells per µm leaf.
+* **S_c/S** — chloroplast surface per unit leaf length.  Adjacency
+  form: fraction of the IAS-exposed cell boundary that has a
+  chloroplast lining it, computed by intersecting `exposed_boundary`
+  with a dilated chloroplast mask (reach ~2 original px).  Raw
+  chloroplast blob perimeters would count inner-cell outlines that
+  never see the gas phase; this form only credits chloroplast wall
+  actually facing IAS.  Critical input to g_m.
+* **f_ias** — intercellular air space fraction within the mesophyll.
+  `1 - (cell_union_area_in_mesophyll / mesophyll_area)`, using the
+  rasterised union of mesophyll-clipped Cellpose cells — avoids
+  double-counting from overlapping Cellpose instance polygons and
+  keeps f_ias bounded in [0, 1] without a clamp.
 * **T_cw** — cell-wall thickness proxy from the distance transform of
   the intercellular gap region (nearest-cell distance at each gap
   pixel).  Approximate — TEM-level T_cw is out of scope here — but
@@ -667,11 +676,14 @@ def compute_co2_morphometrics(
     # encounters.
     #
     # The "near wall" tolerance is chosen in ORIGINAL-image pixels
-    # (CHLOROPLAST_WALL_REACH_ORIG_PX, ~= 1-2 µm at typical microscope
-    # scales) and converted to a ds-kernel — otherwise a fixed-ds
-    # kernel would let bigger/more-downsampled images reach further in
-    # original-px units, skewing cross-image comparisons.
-    chloroplast_wall_reach_orig_px = 5
+    # (CHLOROPLAST_WALL_REACH_ORIG_PX) and converted to a ds-kernel —
+    # otherwise a fixed-ds kernel would let bigger/more-downsampled
+    # images reach further in original-px units, skewing cross-image
+    # comparisons.  Reach=2 orig-px matches the pre-round-2 kernel's
+    # effective reach (5x5 kernel ⇒ radius 2 in the ds grid at
+    # factor=1), so S_c/S magnitude stays comparable with earlier
+    # runs; the fix is purely about scale invariance, not tightening.
+    chloroplast_wall_reach_orig_px = 2
     kernel_radius_ds = max(1, round(chloroplast_wall_reach_orig_px * factor))
     kernel_side_ds = 2 * kernel_radius_ds + 1
     chloroplast_near_wall_kernel = cv2.getStructuringElement(
@@ -721,6 +733,16 @@ def compute_co2_morphometrics(
         # emit those values at isolated boundary pixels.
         gap_dt_raw = dt[gap_mask > 0]
         gap_dt = gap_dt_raw[np.isfinite(gap_dt_raw)]
+        if gap_dt.size == 0:
+            # Cells fill the mesophyll polygon exactly — no IAS pixels
+            # to measure against.  T_cw is undefined here in the same
+            # way it is when there are no cells at all; emit a note
+            # so the operator knows why the µm figures are null.
+            notes.append(
+                "cells fill the mesophyll polygon exactly — no IAS gap "
+                "pixels for the distance-transform measurement; "
+                "T_cw reported as null."
+            )
     else:
         gap_dt = np.empty((0,), dtype=np.float32)
         notes.append(

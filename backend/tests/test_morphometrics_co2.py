@@ -11,7 +11,6 @@ live pipelines).
 from __future__ import annotations
 
 import json
-import math
 from typing import Any
 
 import cv2
@@ -130,6 +129,74 @@ def test_s_mes_s_matches_ias_exposed_boundary_length() -> None:
     assert res.f_ias is not None
     assert res.f_ias == pytest.approx(0.9, rel=0.05)
     assert res.mesophyll_cells.count == 1
+
+
+def test_s_c_s_regression_pin_on_known_wall_adjacent_chloroplast() -> None:
+    """Regression pin for S_c/S magnitude on a fully-specified geometry.
+
+    One 40x40 cell interior to an 80x200 mesophyll rectangle, with a
+    single 12x4 rectangular chloroplast pressed along the top-inner
+    wall of the cell (y ~= 81..85).  Expected S_c/S:
+
+      exposed boundary top-edge of cell ≈ 40 px.
+      chloroplast-dilated reach = 2 orig-px ⇒ ~12 px of top edge
+        is chloroplast-lined (one chloroplast blob, ~12 px wide).
+      section_length = 200 px (major axis).
+      S_c/S ≈ 12 / 200 = 0.06.
+
+    Tolerated at rel=0.3 — the rasterised blob's actual pixel extent
+    after Otsu + morph-open has a couple px of jitter.  The key
+    property this test protects against is silent 2x shifts in the
+    S_c/S magnitude from future refactors of the boundary or reach
+    definitions (rounds 1-3 caught three such shifts).
+    """
+    h, w = 200, 400
+    image = _blank_image(h, w, colour=(170, 195, 215))
+    seg = _segformer_blob([_mesophyll_polygon_blob(100, 60, 300, 140)], h, w)
+    # Lighter cell rectangle, 40x40 at [180..220] x [80..120]
+    cv2.rectangle(image, (180, 80), (220, 120), (180, 210, 225), thickness=-1)
+    # Chloroplast strip along top wall: y=[82..86], x=[184..196]
+    cv2.rectangle(image, (184, 82), (196, 86), (10, 110, 10), thickness=-1)
+    cell = {
+        "polygon": _square_polygon(200, 100, 20),
+        "centroid": [200.0, 100.0],
+        "area_px": 1600,
+    }
+    cp = _cellpose_blob([cell])
+    res = compute_co2_morphometrics(
+        image, seg, cp, um_per_px=1.0, max_side_px=400, chloroplast_min_area_px=4
+    )
+    assert res.chloroplasts.count >= 1
+    assert res.s_c_s is not None
+    assert res.s_c_s == pytest.approx(0.06, rel=0.3)
+
+
+def test_t_cw_null_when_cells_fill_mesophyll_exactly() -> None:
+    """When the Cellpose cell union covers the entire mesophyll
+    polygon, there are no IAS gap pixels for the distance transform
+    to sample.  T_cw must be None with a note — a zero would be
+    picked up by the compare dashboard as a real datapoint.
+    """
+    h, w = 100, 200
+    image = _blank_image(h, w)
+    seg = _segformer_blob([_mesophyll_polygon_blob(50, 25, 150, 75)], h, w)
+    cell = {
+        "polygon": [
+            [50.0, 25.0],
+            [150.0, 25.0],
+            [150.0, 75.0],
+            [50.0, 75.0],
+        ],
+        "centroid": [100.0, 50.0],
+        "area_px": 5000,
+    }
+    cp = _cellpose_blob([cell])
+    res = compute_co2_morphometrics(image, seg, cp, um_per_px=1.0, max_side_px=400)
+    assert res.cell_wall.t_cw_median_um is None
+    assert res.cell_wall.t_cw_p95_um is None
+    assert res.cell_wall.t_cw_median_px is None
+    assert res.cell_wall.gap_pixel_count == 0
+    assert any("cells fill the mesophyll polygon" in n for n in res.notes)
 
 
 def test_shared_wall_between_touching_cells_is_not_counted() -> None:
@@ -366,4 +433,3 @@ def test_result_round_trips_through_strict_json() -> None:
     res = compute_co2_morphometrics(image, seg, cp, um_per_px=1.0, max_side_px=400)
     s = json.dumps(res.to_dict(), allow_nan=False)
     assert "NaN" not in s
-    assert not math.isnan(float("nan") if False else 0.0)  # sanity
