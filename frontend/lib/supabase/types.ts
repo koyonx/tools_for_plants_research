@@ -77,6 +77,53 @@ export type CompareResponse = {
   metrics: CompareMetricResult[];
 };
 
+// PR #11 — LI-COR gas-exchange ingestion
+export type GasExchangeInstrument = "li_6400" | "li_6800" | "generic_csv" | "unknown";
+
+export type GasExchangeSessionRow = {
+  id: string;
+  owner_id: string;
+  label: string | null;
+  instrument: GasExchangeInstrument;
+  source_format: string;
+  file_name: string | null;
+  captured_at: string | null;
+  species: string | null;
+  photosynthesis_type: PhotosynthesisType | null;
+  plant_id: string | null;
+  treatment: string | null;
+  point_count: number;
+  metadata: Record<string, unknown>;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GasExchangePointRow = {
+  id: string;
+  session_id: string;
+  owner_id: string;
+  obs_index: number;
+  recorded_at: string | null;
+  // Standard physiology columns; null when the source file lacked
+  // them or the value was non-finite (NaN/Inf scrubbed at parse time).
+  photo_a: number | null;
+  cond_gsw: number | null;
+  ci_ppm: number | null;
+  co2_ref_ppm: number | null;
+  co2_sample_ppm: number | null;
+  transpiration: number | null;
+  vpd_kpa: number | null;
+  leaf_temp_c: number | null;
+  par_umol: number | null;
+  rh_pct: number | null;
+  flow_umol: number | null;
+  // Verbatim source-file columns we didn't recognise.  Future PDE /
+  // A-Ci fitting work can read instrument-specific fields from here.
+  raw: Record<string, unknown>;
+  created_at: string;
+};
+
 export type BatchRunRow = {
   id: string;
   owner_id: string;

@@ -7,7 +7,12 @@ import { SegFormerPanel } from "@/components/SegFormerPanel";
 import { WaterPathPanel } from "@/components/WaterPathPanel";
 import { toPublicSupabaseUrl } from "@/lib/supabase/public-url";
 import { createClient } from "@/lib/supabase/server";
-import type { AnalysisRow, BasicMeasurementResult, ImageRow } from "@/lib/supabase/types";
+import type {
+  AnalysisRow,
+  BasicMeasurementResult,
+  GasExchangeSessionRow,
+  ImageRow,
+} from "@/lib/supabase/types";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -82,6 +87,20 @@ export default async function ImageDetailPage({
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<AnalysisRow>();
+
+  // PR #11: link to LI-COR gas-exchange sessions captured on the same
+  // plant_id so users can jump from morphology to physiology in one
+  // click.  Skipped silently when image.plant_id is null.
+  const gasExchangeSessions: GasExchangeSessionRow[] = image.plant_id
+    ? (((
+        await supabase
+          .from("gas_exchange_sessions")
+          .select("id, label, instrument, captured_at, point_count, file_name")
+          .eq("plant_id", image.plant_id)
+          .order("captured_at", { ascending: false })
+          .limit(20)
+      ).data ?? []) as GasExchangeSessionRow[])
+    : [];
 
   const {
     data: { user },
@@ -192,6 +211,28 @@ export default async function ImageDetailPage({
           imageWidth={image.width_px}
           imageHeight={image.height_px}
         />
+      )}
+      {gasExchangeSessions.length > 0 && (
+        <section className="space-y-2 rounded-lg border border-neutral-200 p-4 dark:border-neutral-800">
+          <h2 className="text-lg font-semibold">関連 LI-COR ガス交換セッション</h2>
+          <p className="text-xs text-neutral-500">
+            同一 plant_id (<code className="font-mono">{image.plant_id}</code>)
+            で取り込まれたセッション。
+          </p>
+          <ul className="space-y-1 text-sm">
+            {gasExchangeSessions.map((s) => (
+              <li key={s.id} className="font-mono text-xs">
+                <Link href={`/dashboard/gas-exchange?session=${s.id}`} className="underline">
+                  {s.captured_at
+                    ? new Date(s.captured_at).toLocaleString("ja-JP")
+                    : s.id.slice(0, 8)}
+                </Link>{" "}
+                · {s.instrument} · {s.point_count} 点
+                {s.label || s.file_name ? ` · ${s.label ?? s.file_name}` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </div>
   );

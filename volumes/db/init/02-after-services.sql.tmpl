@@ -257,3 +257,197 @@ DROP TRIGGER IF EXISTS batch_runs_set_updated_at ON public.batch_runs;
 CREATE TRIGGER batch_runs_set_updated_at
   BEFORE UPDATE ON public.batch_runs
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ===========================================================================
+-- gas_exchange_sessions (PR #11) — one row per LI-COR file upload.
+--
+-- Holds session-level metadata (instrument, timestamp, plant grouping)
+-- so the morphology pipelines (images + analyses) and the gas-exchange
+-- observations can be joined by plant_id / species.  Feeds the future
+-- CO2-diffusion / Darcy / A-Ci fitting work (PRs #12 / #13).
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS public.gas_exchange_sessions (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id             uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  label                text,
+  instrument           text NOT NULL DEFAULT 'unknown',
+  source_format        text NOT NULL DEFAULT 'unknown',   -- 'xlsx' | 'csv' | 'tsv' | 'unknown'
+  file_name            text,
+  captured_at          timestamptz,
+  species              text,
+  photosynthesis_type  text,
+  plant_id             text,
+  treatment            text,
+  point_count          integer NOT NULL DEFAULT 0,
+  metadata             jsonb NOT NULL DEFAULT '{}'::jsonb,  -- header block from the file
+  notes                text,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  updated_at           timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.gas_exchange_sessions
+  DROP CONSTRAINT IF EXISTS gas_exchange_sessions_instrument_check;
+ALTER TABLE public.gas_exchange_sessions
+  ADD CONSTRAINT gas_exchange_sessions_instrument_check CHECK (
+    instrument IN ('li_6400', 'li_6800', 'generic_csv', 'unknown')
+  );
+
+-- source_format is documented as 'xlsx' | 'csv' | 'tsv' | 'unknown'
+-- in the parser; a direct PostgREST client could otherwise persist
+-- arbitrary values and the frontend switch on source_format would
+-- silently break.  Enforce the same taxonomy at the DB level to
+-- match the instrument constraint above.
+ALTER TABLE public.gas_exchange_sessions
+  DROP CONSTRAINT IF EXISTS gas_exchange_sessions_source_format_check;
+ALTER TABLE public.gas_exchange_sessions
+  ADD CONSTRAINT gas_exchange_sessions_source_format_check CHECK (
+    source_format IN ('xlsx', 'csv', 'tsv', 'unknown')
+  );
+
+ALTER TABLE public.gas_exchange_sessions
+  DROP CONSTRAINT IF EXISTS gas_exchange_sessions_photosynthesis_type_check;
+ALTER TABLE public.gas_exchange_sessions
+  ADD CONSTRAINT gas_exchange_sessions_photosynthesis_type_check CHECK (
+    photosynthesis_type IS NULL
+    OR photosynthesis_type IN ('C3', 'C4', 'C3-C4', 'CAM', 'unknown')
+  );
+
+CREATE INDEX IF NOT EXISTS gas_exchange_sessions_owner_idx
+  ON public.gas_exchange_sessions(owner_id);
+CREATE INDEX IF NOT EXISTS gas_exchange_sessions_plant_id_idx
+  ON public.gas_exchange_sessions(plant_id);
+CREATE INDEX IF NOT EXISTS gas_exchange_sessions_species_idx
+  ON public.gas_exchange_sessions(species);
+CREATE INDEX IF NOT EXISTS gas_exchange_sessions_photosynthesis_type_idx
+  ON public.gas_exchange_sessions(photosynthesis_type);
+CREATE INDEX IF NOT EXISTS gas_exchange_sessions_captured_at_idx
+  ON public.gas_exchange_sessions(captured_at DESC);
+
+ALTER TABLE public.gas_exchange_sessions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "gas_exchange_sessions owner read" ON public.gas_exchange_sessions;
+CREATE POLICY "gas_exchange_sessions owner read"
+  ON public.gas_exchange_sessions FOR SELECT
+  TO authenticated
+  USING (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "gas_exchange_sessions owner write" ON public.gas_exchange_sessions;
+CREATE POLICY "gas_exchange_sessions owner write"
+  ON public.gas_exchange_sessions FOR ALL
+  TO authenticated
+  USING (owner_id = auth.uid())
+  WITH CHECK (owner_id = auth.uid());
+
+DROP TRIGGER IF EXISTS gas_exchange_sessions_set_updated_at
+  ON public.gas_exchange_sessions;
+CREATE TRIGGER gas_exchange_sessions_set_updated_at
+  BEFORE UPDATE ON public.gas_exchange_sessions
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ===========================================================================
+-- gas_exchange_points — per-observation rows (one per LI-COR log entry).
+--
+-- Standard physiology columns are broken out into typed columns so the
+-- /compare dashboard and future A-Ci fits can access them directly.  The
+-- `raw` jsonb column preserves every other column from the source file
+-- verbatim so custom analyses can tap instrument-specific fields later
+-- without us having to re-parse.  `owner_id` is denormalised for cheap
+-- RLS evaluation without a join-through-session on every read.
+-- ===========================================================================
+-- Composite UNIQUE on sessions so the points table can FK to BOTH the
+-- session id AND the session's owner_id.  Without this, a malicious
+-- client could insert points carrying their own auth.uid() but
+-- referencing someone else's session — RLS WITH CHECK on owner_id
+-- alone would let it through, polluting the victim's session.
+ALTER TABLE public.gas_exchange_sessions
+  DROP CONSTRAINT IF EXISTS gas_exchange_sessions_id_owner_unique;
+ALTER TABLE public.gas_exchange_sessions
+  ADD CONSTRAINT gas_exchange_sessions_id_owner_unique UNIQUE (id, owner_id);
+
+CREATE TABLE IF NOT EXISTS public.gas_exchange_points (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id      uuid NOT NULL,
+  owner_id        uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  obs_index       integer NOT NULL,
+  recorded_at     timestamptz,
+  photo_a         double precision,  -- A (µmol/m²/s)
+  cond_gsw        double precision,  -- gsw / Cond (mol H2O/m²/s)
+  ci_ppm          double precision,  -- Ci (µmol/mol)
+  co2_ref_ppm     double precision,  -- CO2R / Ca
+  co2_sample_ppm  double precision,  -- CO2S
+  transpiration   double precision,  -- E / Trmmol
+  vpd_kpa         double precision,  -- VpdL / VPDleaf
+  leaf_temp_c     double precision,  -- Tleaf
+  par_umol        double precision,  -- PARi / Qin / PPFD
+  rh_pct          double precision,  -- RHcham / RH_R
+  flow_umol       double precision,  -- Flow
+  raw             jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+-- Composite FK ties the point to a session whose owner is the same
+-- person.  PG won't even let the row land if (session_id, owner_id)
+-- doesn't match an existing session row pair.  This is enforced by
+-- the database, not just by RLS, so it survives any path that goes
+-- through the service-role key as well.
+ALTER TABLE public.gas_exchange_points
+  DROP CONSTRAINT IF EXISTS gas_exchange_points_session_owner_fk;
+ALTER TABLE public.gas_exchange_points
+  ADD CONSTRAINT gas_exchange_points_session_owner_fk
+    FOREIGN KEY (session_id, owner_id)
+    REFERENCES public.gas_exchange_sessions(id, owner_id)
+    ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS gas_exchange_points_session_idx
+  ON public.gas_exchange_points(session_id, obs_index);
+CREATE INDEX IF NOT EXISTS gas_exchange_points_owner_idx
+  ON public.gas_exchange_points(owner_id);
+
+ALTER TABLE public.gas_exchange_points ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "gas_exchange_points owner read" ON public.gas_exchange_points;
+CREATE POLICY "gas_exchange_points owner read"
+  ON public.gas_exchange_points FOR SELECT
+  TO authenticated
+  USING (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "gas_exchange_points owner write" ON public.gas_exchange_points;
+CREATE POLICY "gas_exchange_points owner write"
+  ON public.gas_exchange_points FOR ALL
+  TO authenticated
+  USING (owner_id = auth.uid())
+  WITH CHECK (owner_id = auth.uid());
+
+-- Keep gas_exchange_sessions.point_count in sync with the actual row
+-- count.  RLS allows owners to insert/update/delete points directly
+-- via PostgREST (without going through the upload endpoint), so the
+-- counter would otherwise drift away from the truth.  The trigger
+-- runs as table-owner and bypasses RLS on the parent session UPDATE
+-- via SECURITY DEFINER — necessary because the row owner who deleted
+-- a point might not have write access to the session in any
+-- hypothetical future RLS variant, and the count must update either way.
+CREATE OR REPLACE FUNCTION public.gas_exchange_points_recount() RETURNS trigger
+  LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  affected uuid;
+BEGIN
+  affected := COALESCE(NEW.session_id, OLD.session_id);
+  IF affected IS NULL THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
+  UPDATE public.gas_exchange_sessions
+     SET point_count = (
+       SELECT COUNT(*) FROM public.gas_exchange_points
+        WHERE session_id = affected
+     )
+   WHERE id = affected;
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+DROP TRIGGER IF EXISTS gas_exchange_points_recount_trg
+  ON public.gas_exchange_points;
+CREATE TRIGGER gas_exchange_points_recount_trg
+  AFTER INSERT OR DELETE OR UPDATE OF session_id
+  ON public.gas_exchange_points
+  FOR EACH ROW EXECUTE FUNCTION public.gas_exchange_points_recount();
