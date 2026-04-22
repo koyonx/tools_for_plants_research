@@ -216,8 +216,21 @@ def _coerce_float(value: Any) -> float | None:
 
 def _coerce_datetime(value: Any) -> str | None:
     """Return an ISO-8601 UTC string, or None if the cell isn't parseable.
+
     LI-COR files carry a mix of ``datetime`` objects (openpyxl) and
-    strings (CSV export)."""
+    strings (CSV export).  Format priority is **unambiguous-first**:
+    we accept ISO-8601 (Y/M/D), then dotted European (D.M.Y), and only
+    fall back to slash dates after rejecting the ones whose
+    interpretation is ambiguous.
+
+    For slash dates, ``M/D/Y`` and ``D/M/Y`` look identical when both
+    fields are <= 12.  Rather than silently mis-parse 50% of those (a
+    real research-data hazard — Aug 7 vs Jul 8 changes which growing
+    season the measurement belongs to), we return None for ambiguous
+    slash dates and let the caller note the issue.  Unambiguous slash
+    dates (one field > 12) are still parsed under MM/DD/YYYY since
+    that's what LI-COR firmware exports in en-US locales.
+    """
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -231,18 +244,43 @@ def _coerce_datetime(value: Any) -> str | None:
         s = value.strip()
         if not s:
             return None
+        # Try unambiguous formats first: ISO-style (Y first) and
+        # dotted European (D.M.Y).  These can never collide.
         for fmt in (
             "%Y-%m-%d %H:%M:%S",
             "%Y-%m-%dT%H:%M:%S",
             "%Y/%m/%d %H:%M:%S",
             "%d.%m.%Y %H:%M:%S",
-            "%m/%d/%Y %H:%M:%S",
         ):
             try:
                 dt = datetime.strptime(s, fmt).replace(tzinfo=UTC)
                 return dt.isoformat()
             except ValueError:
                 continue
+        # Slash format: only accept when one of the leading fields is
+        # > 12, so the M/D vs D/M ambiguity is resolved by data shape.
+        slash_match = re.match(
+            r"^(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$", s
+        )
+        if slash_match:
+            a, b, y, hh, mm, ss = slash_match.groups()
+            ai, bi = int(a), int(b)
+            if ai > 12:
+                # Must be DD/MM/YYYY (else ai isn't a valid month).
+                month, day = bi, ai
+            elif bi > 12:
+                # Must be MM/DD/YYYY.
+                month, day = ai, bi
+            else:
+                # Ambiguous (both <= 12).  Refuse to guess.
+                return None
+            try:
+                dt = datetime(
+                    int(y), month, day, int(hh), int(mm), int(ss or 0), tzinfo=UTC
+                )
+                return dt.isoformat()
+            except ValueError:
+                return None
         # Final attempt: pure ISO
         try:
             dt = datetime.fromisoformat(s)
@@ -267,14 +305,25 @@ def _is_unit_row(row: list[Any]) -> bool:
     return hits / len(nonempty) > 0.5
 
 
-def _score_header(row: list[Any]) -> tuple[int, dict[int, str], list[str]]:
-    """Return (match_count, col_index → canonical_key, raw header strings).
+def _score_header(
+    row: list[Any],
+) -> tuple[int, dict[int, str], list[str], list[tuple[int, str]]]:
+    """Return (match_count, col_index → canonical_key, raw header
+    strings, list of duplicate (col_index, canonical_key)).
 
-    `match_count` is how many canonical keys this row's tokens alias to;
-    we pick the row with the highest score (ties → earliest row)."""
+    `match_count` is how many canonical keys this row's tokens alias
+    to.  When two header columns alias to the same canonical key (e.g.
+    a hand-edited file with both ``Photo`` AND ``A`` columns), the
+    FIRST occurrence wins for the typed column and the duplicate is
+    reported via the fourth tuple element so the caller can keep the
+    duplicate's value in the `raw` blob — overwriting silently would
+    drop data, which is unsafe given the user explicitly asked for
+    robustness across operator-edited variants.
+    """
     col_to_key: dict[int, str] = {}
     raw_headers: list[str] = []
     seen_keys: set[str] = set()
+    duplicates: list[tuple[int, str]] = []
     for i, cell in enumerate(row):
         if cell is None:
             raw_headers.append("")
@@ -287,28 +336,36 @@ def _score_header(row: list[Any]) -> tuple[int, dict[int, str], list[str]]:
         if not token:
             continue
         key = _TOKEN_TO_KEY.get(token)
-        if key is not None:
-            col_to_key[i] = key
-            seen_keys.add(key)
-    return len(seen_keys), col_to_key, raw_headers
+        if key is None:
+            continue
+        if key in seen_keys:
+            # First column wins; later duplicates flow into raw via
+            # the duplicates list so the caller can preserve them.
+            duplicates.append((i, key))
+            continue
+        col_to_key[i] = key
+        seen_keys.add(key)
+    return len(seen_keys), col_to_key, raw_headers, duplicates
 
 
 def _find_header_row(
     rows: list[list[Any]],
-) -> tuple[int, dict[int, str], list[str]]:
+) -> tuple[int, dict[int, str], list[str], list[tuple[int, str]]]:
     """Pick the first row with the strongest alias match.  Raises if no
     row has >= HEADER_MIN_KEYWORDS known columns."""
     best_idx = -1
     best_score = 0
     best_map: dict[int, str] = {}
     best_headers: list[str] = []
+    best_dupes: list[tuple[int, str]] = []
     for idx, row in enumerate(rows):
-        score, col_map, raw = _score_header(row)
+        score, col_map, raw, dupes = _score_header(row)
         if score > best_score:
             best_score = score
             best_idx = idx
             best_map = col_map
             best_headers = raw
+            best_dupes = dupes
             if score >= len(COLUMN_ALIASES):
                 break  # perfect match, can't do better
     if best_score < HEADER_MIN_KEYWORDS:
@@ -318,7 +375,7 @@ def _find_header_row(
             "Ensure the file is a LI-6400/LI-6800 export or a CSV with "
             "columns like Photo/A, Cond/gsw, Ci, ..."
         )
-    return best_idx, best_map, best_headers
+    return best_idx, best_map, best_headers, best_dupes
 
 
 def _infer_instrument(
@@ -398,9 +455,14 @@ def _parse_rows(
     if not rows:
         raise LicorParseError("empty file")
 
-    header_idx, col_to_key, raw_headers = _find_header_row(rows)
+    header_idx, col_to_key, raw_headers, duplicate_alias_cols = _find_header_row(rows)
     metadata_rows = rows[:header_idx]
     body_rows = rows[header_idx + 1 :]
+    # Column indexes whose canonical key collided with an earlier
+    # column.  We know these are alias-of-numeric so we float-coerce
+    # them when routing into `raw` (vs. the verbatim string preserved
+    # for genuinely unknown columns like operator status flags).
+    duplicate_col_idx: set[int] = {idx for idx, _ in duplicate_alias_cols}
 
     # Skip optional LI-6800 unit row directly under the header.
     if body_rows and _is_unit_row(body_rows[0]):
@@ -471,6 +533,14 @@ def _parse_rows(
         else:
             oi = len(points) + 1
 
+        # Duplicate-alias columns (e.g. an operator-edited file with
+        # BOTH `Photo` AND `A`) are intentionally absent from
+        # `col_to_key` so the first occurrence wins for the typed
+        # column.  Their values still flow into `raw_extras` under
+        # the original header so nothing is silently dropped — but we
+        # float-coerce them since we KNOW they're alias-of-numeric;
+        # genuinely-unknown columns stay verbatim (operator status
+        # flags like "ok"/"flagged" must round-trip as strings).
         raw_extras: dict[str, Any] = {}
         for i, header in enumerate(raw_headers):
             if i in col_to_key or i in (recorded_col, obs_col):
@@ -479,7 +549,10 @@ def _parse_rows(
                 continue
             if i >= len(row):
                 continue
-            raw_extras[header] = _cell_to_json_safe(row[i])
+            if i in duplicate_col_idx:
+                raw_extras[header] = _coerce_float(row[i])
+            else:
+                raw_extras[header] = _cell_to_json_safe(row[i])
 
         points.append(
             ParsedPoint(
@@ -500,13 +573,38 @@ def _parse_rows(
         if val is not None:
             captured = _coerce_datetime(val)
 
+    diagnostic_notes: list[str] = []
+    if duplicate_alias_cols:
+        # Surface the alias collision so the operator knows which
+        # column was treated as ground truth and where to look for
+        # the duplicate's values (in `raw`).
+        first_idx = {key: idx for idx, key in col_to_key.items()}
+        details = ", ".join(
+            f"col[{idx}]='{raw_headers[idx]}' lost to col[{first_idx[k]}]='{raw_headers[first_idx[k]]}' for {k}"
+            for idx, k in duplicate_alias_cols
+        )
+        diagnostic_notes.append(
+            f"duplicate alias columns detected; first occurrence wins, "
+            f"duplicates preserved in `raw`: {details}"
+        )
+    if len(body_rows) > 0 and len(points) == 0:
+        # All body rows existed but every one was non-numeric / NaN.
+        # Flag explicitly so the operator doesn't see "0 points" with
+        # no clue whether the file was empty or every row was scrubbed.
+        diagnostic_notes.append(
+            f"file had {len(body_rows)} body rows but none yielded a "
+            "numeric measurement value — every row was empty / NaN / "
+            "non-coercible.  Check that the source file has cached "
+            "formula values (openpyxl cannot evaluate live formulas)."
+        )
+
     return ParsedSession(
         instrument=instrument,
         source_format=source_format,
         captured_at=captured,
         file_name=file_name,
         metadata=meta_dict,
-        notes=None,
+        notes="; ".join(diagnostic_notes) if diagnostic_notes else None,
         points=points,
     )
 

@@ -8,7 +8,7 @@ import type {
   PhotosynthesisType,
 } from "@/lib/supabase/types";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
 
@@ -633,8 +633,10 @@ function FieldList({
   options: readonly string[];
   onChange: (v: string) => void;
 }) {
-  // Datalist gives us free-text + suggestions in one control.
-  const id = `${label}-${Math.random().toString(36).slice(2)}`;
+  // Datalist gives us free-text + suggestions in one control.  useId
+  // gives a stable ID across renders + SSR; Math.random() in a render
+  // body would change every paint and break label/datalist association.
+  const id = useId();
   return (
     <label className="block text-xs text-neutral-500">
       <span className="mb-1 block">{label}</span>

@@ -253,6 +253,122 @@ def _is_finite(x: Any) -> bool:
     return isinstance(x, float) and math.isfinite(x)
 
 
+def test_duplicate_alias_columns_first_wins_loser_in_raw() -> None:
+    """An operator-edited file with BOTH ``Photo`` AND ``A`` columns
+    must keep the FIRST occurrence as the typed `photo_a` and route
+    the duplicate's value into `raw` so nothing is silently lost.
+    The session also gets a diagnostic note describing the collision.
+    """
+    data = (
+        b"Obs,Photo,A,Cond,Ci,PARi\n"
+        b"1,15.0,99.9,0.25,260,1500\n"
+        b"2,14.5,99.5,0.24,265,1500\n"
+    )
+    session = parse_delimited(data)
+    assert session.points[0].photo_a == pytest.approx(15.0)
+    # Duplicate `A` value flows into raw under its original header.
+    assert session.points[0].raw.get("A") == pytest.approx(99.9)
+    assert session.notes is not None
+    assert "duplicate alias" in session.notes
+    assert "photo_a" in session.notes
+
+
+def test_ambiguous_slash_date_returns_none_no_silent_misclassification() -> None:
+    """A slash date where both leading fields are <= 12 is ambiguous
+    (M/D/Y vs D/M/Y).  Refuse to guess — silently picking one
+    convention would shift A-Ci measurements by months in operator
+    files from non-en-US locales."""
+    # 03/04/2025 could mean March 4 or April 3 — return None.
+    data = (
+        b"Obs,time,Photo,Cond,Ci,PARi\n"
+        b"1,03/04/2025 10:00:00,15.0,0.25,260,1500\n"
+    )
+    session = parse_delimited(data)
+    assert session.points[0].recorded_at is None
+
+
+def test_unambiguous_slash_date_with_day_over_12_parses_as_dd_mm() -> None:
+    # 25/04/2025 → can only mean Apr 25.  Parser must not silently
+    # produce a different month.
+    data = (
+        b"Obs,time,Photo,Cond,Ci,PARi\n"
+        b"1,25/04/2025 10:00:00,15.0,0.25,260,1500\n"
+    )
+    session = parse_delimited(data)
+    assert session.points[0].recorded_at is not None
+    assert "2025-04-25" in session.points[0].recorded_at
+
+
+def test_unambiguous_slash_date_with_month_over_12_parses_as_mm_dd() -> None:
+    # 04/25/2025 → can only mean Apr 25 with MM/DD ordering.
+    data = (
+        b"Obs,time,Photo,Cond,Ci,PARi\n"
+        b"1,04/25/2025 10:00:00,15.0,0.25,260,1500\n"
+    )
+    session = parse_delimited(data)
+    assert session.points[0].recorded_at is not None
+    assert "2025-04-25" in session.points[0].recorded_at
+
+
+def test_dotted_european_date_unambiguous() -> None:
+    # 03.04.2025 (D.M.Y) is unambiguous — we accept it directly.
+    data = (
+        b"Obs,time,Photo,Cond,Ci,PARi\n"
+        b"1,03.04.2025 10:00:00,15.0,0.25,260,1500\n"
+    )
+    session = parse_delimited(data)
+    assert session.points[0].recorded_at is not None
+    assert "2025-04-03" in session.points[0].recorded_at
+
+
+def test_all_nan_body_emits_diagnostic_note() -> None:
+    """A file whose body rows have header but every cell is empty / NaN
+    should produce zero points AND a note explaining what happened —
+    operator shouldn't see "0 points" with no context."""
+    data = (
+        b"Obs,Photo,Cond,Ci,PARi\n"
+        b"1,NaN,NaN,NaN,NaN\n"
+        b"2,,,,\n"
+    )
+    session = parse_delimited(data)
+    assert len(session.points) == 0
+    assert session.notes is not None
+    assert "numeric measurement" in session.notes
+
+
+def test_quoted_csv_with_embedded_commas_in_strings() -> None:
+    """csv.reader handles quoted-field embedded commas natively, but
+    confirm the parser leaves those fields intact and doesn't mangle
+    column alignment."""
+    data = (
+        b'Obs,Photo,Cond,Ci,PARi,Note\n'
+        b'1,15.0,0.25,260,1500,"steady, mid-day reading"\n'
+        b'2,14.7,0.24,262,1500,"after, watering"\n'
+    )
+    session = parse_delimited(data)
+    assert len(session.points) == 2
+    assert session.points[0].photo_a == pytest.approx(15.0)
+    assert session.points[0].raw.get("Note") == "steady, mid-day reading"
+
+
+def test_mixed_case_and_spaced_headers_still_match_aliases() -> None:
+    """Headers like ' photo ' or 'COND' or 'A_Net' — case + whitespace
+    must not break the alias lookup."""
+    data = (
+        b"Obs, photo , COND ,A_Net,CI,PARi\n"
+        b"1,15.0,0.25,99.0,260,1500\n"
+    )
+    session = parse_delimited(data)
+    p = session.points[0]
+    # First alias-match wins for photo_a (the ' photo ' column).
+    assert p.photo_a == pytest.approx(15.0)
+    assert p.cond_gsw == pytest.approx(0.25)
+    assert p.ci_ppm == pytest.approx(260.0)
+    # A_Net (canonical key 'a_net') is also an alias of photo_a; first
+    # column wins, A_Net flows into raw.
+    assert p.raw.get("A_Net") == pytest.approx(99.0)
+
+
 def test_to_dict_is_jsonable_and_preserves_structure() -> None:
     session = parse_delimited(_li6400_tsv(num_points=2))
     d = session.to_dict()

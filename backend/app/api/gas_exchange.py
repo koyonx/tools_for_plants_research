@@ -99,20 +99,32 @@ async def upload_gas_exchange_file(
     sb = SupabaseAuthedClient(jwt)
     owner_id = await _resolve_owner_id(sb)
 
-    raw = await file.read()
+    # Stream-bound the upload so a malicious / mistaken huge file
+    # doesn't fully materialise in memory before we reject it.  An
+    # 8 KB chunk size is a fine balance between syscall overhead and
+    # tight memory bounds — at MAX_UPLOAD_BYTES=25 MB the loop
+    # iterates ~3200 times before tripping.
+    raw = bytearray()
+    chunk_size = 8 * 1024
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        raw.extend(chunk)
+        if len(raw) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"file exceeds {MAX_UPLOAD_BYTES // 1024 // 1024} MB upload cap; "
+                    "trim the LI-COR log or split into multiple sessions"
+                ),
+            )
     if not raw:
         raise HTTPException(status_code=400, detail="empty file")
-    if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                f"file is {len(raw) / 1024 / 1024:.1f} MB, "
-                f"max accepted is {MAX_UPLOAD_BYTES // 1024 // 1024} MB"
-            ),
-        )
+    raw_bytes = bytes(raw)
 
     try:
-        parsed = parse_file(raw, file_name=file.filename)
+        parsed = parse_file(raw_bytes, file_name=file.filename)
     except LicorParseError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

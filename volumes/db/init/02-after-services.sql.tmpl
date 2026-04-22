@@ -342,9 +342,19 @@ CREATE TRIGGER gas_exchange_sessions_set_updated_at
 -- without us having to re-parse.  `owner_id` is denormalised for cheap
 -- RLS evaluation without a join-through-session on every read.
 -- ===========================================================================
+-- Composite UNIQUE on sessions so the points table can FK to BOTH the
+-- session id AND the session's owner_id.  Without this, a malicious
+-- client could insert points carrying their own auth.uid() but
+-- referencing someone else's session — RLS WITH CHECK on owner_id
+-- alone would let it through, polluting the victim's session.
+ALTER TABLE public.gas_exchange_sessions
+  DROP CONSTRAINT IF EXISTS gas_exchange_sessions_id_owner_unique;
+ALTER TABLE public.gas_exchange_sessions
+  ADD CONSTRAINT gas_exchange_sessions_id_owner_unique UNIQUE (id, owner_id);
+
 CREATE TABLE IF NOT EXISTS public.gas_exchange_points (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id      uuid NOT NULL REFERENCES public.gas_exchange_sessions(id) ON DELETE CASCADE,
+  session_id      uuid NOT NULL,
   owner_id        uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   obs_index       integer NOT NULL,
   recorded_at     timestamptz,
@@ -362,6 +372,19 @@ CREATE TABLE IF NOT EXISTS public.gas_exchange_points (
   raw             jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at      timestamptz NOT NULL DEFAULT now()
 );
+
+-- Composite FK ties the point to a session whose owner is the same
+-- person.  PG won't even let the row land if (session_id, owner_id)
+-- doesn't match an existing session row pair.  This is enforced by
+-- the database, not just by RLS, so it survives any path that goes
+-- through the service-role key as well.
+ALTER TABLE public.gas_exchange_points
+  DROP CONSTRAINT IF EXISTS gas_exchange_points_session_owner_fk;
+ALTER TABLE public.gas_exchange_points
+  ADD CONSTRAINT gas_exchange_points_session_owner_fk
+    FOREIGN KEY (session_id, owner_id)
+    REFERENCES public.gas_exchange_sessions(id, owner_id)
+    ON DELETE CASCADE;
 
 CREATE INDEX IF NOT EXISTS gas_exchange_points_session_idx
   ON public.gas_exchange_points(session_id, obs_index);
