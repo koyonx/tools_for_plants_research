@@ -14,6 +14,7 @@ const PIPELINE_CHOICES: { key: string; label: string }[] = [
   { key: "segformer_tissue", label: "SegFormer 組織分割" },
   { key: "cellpose_cells", label: "Cellpose 細胞検出" },
   { key: "water_path", label: "水経路（要 SegFormer）" },
+  { key: "co2_morphometrics", label: "CO₂形態パラメータ（要 SegFormer + Cellpose）" },
 ];
 
 type Props = {

@@ -5,6 +5,7 @@ from app.api import (
     analyze,
     batches,
     cellpose,
+    co2_morphometrics,
     compare,
     health,
     segformer,
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(cellpose.router, tags=["analyze"])
     app.include_router(segformer.router, tags=["analyze"])
     app.include_router(water_path.router, tags=["analyze"])
+    app.include_router(co2_morphometrics.router, tags=["analyze"])
     app.include_router(batches.router, tags=["batches"])
     app.include_router(compare.router, tags=["compare"])
     app.include_router(training.router, tags=["training"])

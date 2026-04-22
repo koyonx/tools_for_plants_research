@@ -1,5 +1,6 @@
 import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { CellposePanel } from "@/components/CellposePanel";
+import { Co2MorphometricsPanel } from "@/components/Co2MorphometricsPanel";
 import { ImageMetadataEditor } from "@/components/ImageMetadataEditor";
 import { ImageViewer } from "@/components/ImageViewer";
 import { SegFormerPanel } from "@/components/SegFormerPanel";
@@ -69,6 +70,15 @@ export default async function ImageDetailPage({
     .select("*")
     .eq("image_id", image.id)
     .eq("kind", "water_path")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<AnalysisRow>();
+
+  const { data: latestCo2Morph } = await supabase
+    .from("analyses")
+    .select("*")
+    .eq("image_id", image.id)
+    .eq("kind", "co2_morphometrics")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<AnalysisRow>();
@@ -161,6 +171,22 @@ export default async function ImageDetailPage({
           initial={latestWaterPath ?? null}
           hasSegformerResult={Boolean(
             latestSegformer && latestSegformer.status === "done" && latestSegformer.result,
+          )}
+          canRun={isOwner}
+          imageWidth={image.width_px}
+          imageHeight={image.height_px}
+        />
+      )}
+      {signed?.signedUrl && image.width_px && image.height_px && (
+        <Co2MorphometricsPanel
+          imageId={image.id}
+          imageUrl={toPublicSupabaseUrl(signed.signedUrl)}
+          initial={latestCo2Morph ?? null}
+          hasSegformerResult={Boolean(
+            latestSegformer && latestSegformer.status === "done" && latestSegformer.result,
+          )}
+          hasCellposeResult={Boolean(
+            latestCellpose && latestCellpose.status === "done" && latestCellpose.result,
           )}
           canRun={isOwner}
           imageWidth={image.width_px}

@@ -6,7 +6,38 @@ hasn't tagged a release yet, so everything below is on `main`.
 
 ## [Unreleased]
 
-### PR #9 — statistical comparison dashboard (current)
+### PR #10 — CO2 diffusion morphometrics (current)
+- `backend/app/pipeline/morphometrics_co2.py`: classical-CV computation
+  of the Evans & von Caemmerer / Tosens mesophyll-conductance inputs
+  from existing SegFormer tissue polygons + Cellpose cell polygons.
+  Outputs S_mes/S (Σ cell perimeter / leaf section length), S_c/S
+  (Σ chloroplast perimeter / leaf section length), f_ias (1 − Σ cell
+  area / mesophyll area), and a T_cw proxy from the distance transform
+  of the intercellular gap region.  Chloroplast detection is a
+  per-cell LAB a* Otsu with a contrast guard — drops cleanly into a
+  learned detector later without changing the result schema.
+- `backend/app/api/co2_morphometrics.py`: `POST /images/{id}/analyze/
+  co2-morphometrics` + `GET /analyze/co2-morphometrics/status` probe.
+  Requires `segformer_tissue` AND `cellpose_cells` completed; runs the
+  computation in a `BackgroundTask` + `asyncio.to_thread`.
+- `batches.py`: `co2_morphometrics` added to `SUPPORTED_KINDS`,
+  `PipelineKind`, and `_PIPELINE_EXEC_ORDER` (last, since it needs
+  both upstream pipelines).  Batch dispatcher re-uses the same
+  prerequisite lookup as the per-image endpoint.
+- `compare.py`: 8 new metric keys (`co2_s_mes_s`, `co2_s_c_s`,
+  `co2_f_ias`, `co2_t_cw_median_um`, `co2_t_cw_p95_um`,
+  `co2_chloroplast_count`, `co2_chloroplast_coverage`,
+  `co2_mesophyll_thickness_median_um`) auto-surface in the dashboard.
+- `Co2MorphometricsPanel.tsx` mounted on the image detail page below
+  the WaterPath panel.  Dual prereq probe, result table, overlay PNG
+  showing the detected chloroplasts.
+- `ImageBatchPicker.tsx` gets the new pipeline checkbox.
+- 9 pytest cases for morphometrics_co2: empty mesophyll, known
+  perimeter-over-length ratio, f_ias = 0 / > 0, excluded cells,
+  um_per_px scale invariance, chloroplast detection, low-contrast
+  skip, T_cw proxy sanity, strict-JSON round-trip.
+
+### PR #9 — statistical comparison dashboard
 - `backend/app/pipeline/stats.py`: Welch's t (scipy), Mann-Whitney U,
   Cohen's d, Hedges' g (with small-sample bias correction), and a
   percentile bootstrap 95% CI for Hedges' g.  6 pytest cases cover

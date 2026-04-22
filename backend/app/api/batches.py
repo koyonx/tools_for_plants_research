@@ -37,24 +37,28 @@ SUPPORTED_KINDS = (
     "cellpose_cells",
     "segformer_tissue",
     "water_path",
+    "co2_morphometrics",
 )
 PipelineKind = Literal[
     "basic_measurement",
     "cellpose_cells",
     "segformer_tissue",
     "water_path",
+    "co2_morphometrics",
 ]
 
 # Topological execution order: later entries may depend on earlier ones.
-# (water_path needs segformer_tissue; basic_measurement provides scale
-# that water_path and segformer-µm-conversion can pick up.)  We sort by
-# this order regardless of what the client sent, so `Set`-iteration on
-# the frontend can't produce a broken schedule.
+# (water_path needs segformer_tissue; co2_morphometrics needs BOTH
+# segformer_tissue and cellpose_cells; basic_measurement provides the
+# µm/px scale.)  We sort by this order regardless of what the client
+# sent, so `Set`-iteration on the frontend can't produce a broken
+# schedule.
 _PIPELINE_EXEC_ORDER: tuple[str, ...] = (
     "basic_measurement",
     "cellpose_cells",
     "segformer_tissue",
     "water_path",
+    "co2_morphometrics",
 )
 
 
@@ -355,6 +359,54 @@ async def _run_pipeline(
                     "um_per_px": um_per_px,
                 },
                 "result": water_result.to_dict(),
+            }
+        )
+        return str(row["id"])
+
+    if kind == "co2_morphometrics":
+        # Classical CV on top of the already-done SegFormer + Cellpose
+        # blobs; no ML model load, but still CPU-heavy due to per-cell
+        # Otsu and the distance transform → run it off the event loop.
+        from app.pipeline.morphometrics_co2 import compute_co2_morphometrics
+
+        seg = await sb.latest_analysis_for(image_id, "segformer_tissue", status="done")
+        if seg is None or not isinstance(seg.get("result"), dict):
+            raise RuntimeError(
+                "co2_morphometrics requires a prior segformer_tissue run on the same image"
+            )
+        cells = await sb.latest_analysis_for(image_id, "cellpose_cells", status="done")
+        if cells is None or not isinstance(cells.get("result"), dict):
+            raise RuntimeError(
+                "co2_morphometrics requires a prior cellpose_cells run on the same image"
+            )
+        basic = await sb.latest_analysis_for(image_id, "basic_measurement", status="done")
+        co2_um_per_px: float | None = image.get("scale_um_per_px")
+        if not co2_um_per_px and isinstance(basic, dict):
+            co2_basic_blob = basic.get("result")
+            if isinstance(co2_basic_blob, dict):
+                s = (co2_basic_blob.get("scale") or {}).get("um_per_px")
+                if isinstance(s, int | float) and s > 0:
+                    co2_um_per_px = float(s)
+        co2_result = await asyncio.to_thread(
+            compute_co2_morphometrics,
+            image_bgr,
+            seg["result"],
+            cells["result"],
+            um_per_px=co2_um_per_px,
+            max_side_px=int(params["max_side_px"]),
+        )
+        row = await sb.insert_analysis(
+            {
+                "image_id": image_id,
+                "kind": kind,
+                "status": "done",
+                "parameters": {
+                    "max_side_px": int(params["max_side_px"]),
+                    "source_segformer_id": seg["id"],
+                    "source_cellpose_id": cells["id"],
+                    "um_per_px": co2_um_per_px,
+                },
+                "result": co2_result.to_dict(),
             }
         )
         return str(row["id"])

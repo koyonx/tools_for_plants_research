@@ -190,6 +190,70 @@ export type WaterPathResult = {
   resistance: Record<string, number>;
 };
 
+// PR #10 — CO2 diffusion morphometrics.  All numeric fields may be
+// null when the pipeline couldn't compute them (missing prerequisite,
+// empty mesophyll mask, low-contrast chloroplast detection, etc).
+// JSON-safe: the backend replaces NaN/Inf with null before returning.
+export type Co2MesophyllStats = {
+  area_px: number;
+  area_um2: number | null;
+  thickness_mean_um: number | null;
+  thickness_median_um: number | null;
+  section_length_um: number | null;
+  section_length_px: number;
+};
+
+export type Co2CellAggregateStats = {
+  count: number;
+  perimeter_total_um: number | null;
+  perimeter_total_px: number;
+  area_total_um2: number | null;
+  area_total_px: number;
+  mean_perimeter_um: number | null;
+  mean_area_um2: number | null;
+};
+
+export type Co2ChloroplastStats = {
+  count: number;
+  total_area_px: number;
+  total_area_um2: number | null;
+  mean_area_um2: number | null;
+  total_perimeter_um: number | null;
+  coverage_of_mesophyll_cells: number | null;
+  detection_method: string;
+  a_channel_contrast: number;
+};
+
+export type Co2CellWallStats = {
+  t_cw_mean_um: number | null;
+  t_cw_median_um: number | null;
+  t_cw_p95_um: number | null;
+  // px fields are null when there are no mesophyll-clipped cells to
+  // seed the distance transform — otherwise zero-values would be
+  // picked up as real datapoints by the comparison dashboard.
+  t_cw_mean_px: number | null;
+  t_cw_median_px: number | null;
+  t_cw_p95_px: number | null;
+  gap_pixel_count: number;
+};
+
+export type Co2MorphometricsResult = {
+  source_class: string[];
+  downsample_factor: number;
+  um_per_px: number | null;
+  image_shape: { height_px: number; width_px: number };
+  mesophyll: Co2MesophyllStats;
+  mesophyll_cells: Co2CellAggregateStats;
+  chloroplasts: Co2ChloroplastStats;
+  cell_wall: Co2CellWallStats;
+  // Top-level dimensionless scalars — Evans & von Caemmerer 2-D proxies.
+  s_mes_s: number | null;
+  s_c_s: number | null;
+  f_ias: number | null;
+  chloroplast_overlay_png_base64: string;
+  notes: string[];
+};
+
 export type AnalysisRow = {
   id: string;
   image_id: string;
