@@ -77,6 +77,38 @@ export type CompareResponse = {
   metrics: CompareMetricResult[];
 };
 
+// PR #13a — CO2 reaction-diffusion PDE solver
+export type Co2StomatumDrawdown = {
+  centroid: [number, number];
+  cc_mean_pa: number | null;
+  drawdown_pa: number | null;
+  flow_in: number;
+};
+
+export type Co2DiffusionResult = {
+  sink_class: "chloroplast" | "mesophyll_cells";
+  ci_pa: number;
+  cc_mean_pa: number | null;
+  drawdown_mean_pa: number | null;
+  drawdown_max_pa: number | null;
+  // CO2 flux integrated into the sink in mol/(s·m) per-metre-depth.
+  a_net: number;
+  // Leaf section length in metres — denominator used to turn the
+  // per-metre-depth flux into per-unit-leaf-area flux for g_m.
+  leaf_section_length_m: number;
+  // Area-normalised ad-hoc mesophyll conductance
+  // = A_net / (leaf_section_length · (Ci - Cc))   [mol/(m²·s·Pa)]
+  g_m_proxy: number | null;
+  stomata_drawdowns: Co2StomatumDrawdown[];
+  concentration_png_base64: string;
+  drawdown_png_base64: string;
+  heatmap_shape: [number, number];
+  downsample_factor: number;
+  diffusivity: Record<string, number>;
+  reaction_rate: number;
+  notes: string[];
+};
+
 // PR #12 — Darcy water-flow PDE solver
 export type DarcyStomatumFlow = {
   centroid: [number, number];

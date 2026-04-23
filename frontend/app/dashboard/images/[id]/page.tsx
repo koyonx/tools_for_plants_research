@@ -1,5 +1,6 @@
 import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { CellposePanel } from "@/components/CellposePanel";
+import { Co2DiffusionPanel } from "@/components/Co2DiffusionPanel";
 import { Co2MorphometricsPanel } from "@/components/Co2MorphometricsPanel";
 import { DarcyPanel } from "@/components/DarcyPanel";
 import { ImageMetadataEditor } from "@/components/ImageMetadataEditor";
@@ -94,6 +95,15 @@ export default async function ImageDetailPage({
     .select("*")
     .eq("image_id", image.id)
     .eq("kind", "darcy_flow")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<AnalysisRow>();
+
+  const { data: latestCo2Diffusion } = await supabase
+    .from("analyses")
+    .select("*")
+    .eq("image_id", image.id)
+    .eq("kind", "co2_diffusion")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<AnalysisRow>();
@@ -229,6 +239,22 @@ export default async function ImageDetailPage({
           )}
           hasCellposeResult={Boolean(
             latestCellpose && latestCellpose.status === "done" && latestCellpose.result,
+          )}
+          canRun={isOwner}
+          imageWidth={image.width_px}
+          imageHeight={image.height_px}
+        />
+      )}
+      {signed?.signedUrl && image.width_px && image.height_px && (
+        <Co2DiffusionPanel
+          imageId={image.id}
+          imageUrl={toPublicSupabaseUrl(signed.signedUrl)}
+          initial={latestCo2Diffusion ?? null}
+          hasSegformerResult={Boolean(
+            latestSegformer && latestSegformer.status === "done" && latestSegformer.result,
+          )}
+          hasCo2MorphResult={Boolean(
+            latestCo2Morph && latestCo2Morph.status === "done" && latestCo2Morph.result,
           )}
           canRun={isOwner}
           imageWidth={image.width_px}

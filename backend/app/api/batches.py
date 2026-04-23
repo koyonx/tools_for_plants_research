@@ -39,6 +39,7 @@ SUPPORTED_KINDS = (
     "water_path",
     "darcy_flow",
     "co2_morphometrics",
+    "co2_diffusion",
 )
 PipelineKind = Literal[
     "basic_measurement",
@@ -47,14 +48,13 @@ PipelineKind = Literal[
     "water_path",
     "darcy_flow",
     "co2_morphometrics",
+    "co2_diffusion",
 ]
 
 # Topological execution order: later entries may depend on earlier ones.
-# (water_path + darcy_flow need segformer_tissue; co2_morphometrics
-# needs BOTH segformer_tissue and cellpose_cells; basic_measurement
-# provides the µm/px scale.)  We sort by this order regardless of
-# what the client sent, so `Set`-iteration on the frontend can't
-# produce a broken schedule.
+# co2_diffusion is the new last step — optionally consumes the
+# chloroplast overlay from co2_morphometrics, strictly requires
+# segformer_tissue.
 _PIPELINE_EXEC_ORDER: tuple[str, ...] = (
     "basic_measurement",
     "cellpose_cells",
@@ -62,6 +62,7 @@ _PIPELINE_EXEC_ORDER: tuple[str, ...] = (
     "water_path",
     "darcy_flow",
     "co2_morphometrics",
+    "co2_diffusion",
 )
 
 
@@ -450,6 +451,58 @@ async def _run_pipeline(
                     "um_per_px": co2_um_per_px,
                 },
                 "result": co2_result.to_dict(),
+            }
+        )
+        return str(row["id"])
+
+    if kind == "co2_diffusion":
+        # CO2 reaction-diffusion PDE.  Strictly requires segformer_tissue;
+        # optionally consumes the chloroplast overlay from
+        # co2_morphometrics to pin the sink to actual chloroplasts
+        # (when absent, falls back to mesophyll cells).
+        from app.pipeline.co2_diffusion import compute_co2_diffusion
+
+        seg = await sb.latest_analysis_for(image_id, "segformer_tissue", status="done")
+        if seg is None or not isinstance(seg.get("result"), dict):
+            raise RuntimeError(
+                "co2_diffusion requires a prior segformer_tissue run on the same image"
+            )
+        co2_morph_row = await sb.latest_analysis_for(
+            image_id, "co2_morphometrics", status="done"
+        )
+        morph_blob = (
+            co2_morph_row.get("result") if isinstance(co2_morph_row, dict) else None
+        )
+        basic = await sb.latest_analysis_for(image_id, "basic_measurement", status="done")
+        diff_um_per_px: float | None = image.get("scale_um_per_px")
+        if not diff_um_per_px and isinstance(basic, dict):
+            diff_basic_blob = basic.get("result")
+            if isinstance(diff_basic_blob, dict):
+                s = (diff_basic_blob.get("scale") or {}).get("um_per_px")
+                if isinstance(s, int | float) and s > 0:
+                    diff_um_per_px = float(s)
+        diffusion_result = await asyncio.to_thread(
+            compute_co2_diffusion,
+            seg["result"],
+            co2_morphometrics_result=morph_blob if isinstance(morph_blob, dict) else None,
+            um_per_px=diff_um_per_px,
+            max_side_px=int(params["max_side_px"]),
+        )
+        morph_id = (
+            co2_morph_row.get("id") if isinstance(co2_morph_row, dict) else None
+        )
+        row = await sb.insert_analysis(
+            {
+                "image_id": image_id,
+                "kind": kind,
+                "status": "done",
+                "parameters": {
+                    "max_side_px": int(params["max_side_px"]),
+                    "source_segformer_id": seg["id"],
+                    "source_co2_morphometrics_id": morph_id,
+                    "um_per_px": diff_um_per_px,
+                },
+                "result": diffusion_result.to_dict(),
             }
         )
         return str(row["id"])

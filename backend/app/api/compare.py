@@ -223,6 +223,37 @@ METRICS: tuple[MetricDef, ...] = (
         analysis_kind="darcy_flow",
         path=("pressure_drop_pa",),
     ),
+    # CO2 reaction-diffusion scalars (PR #13a).  g_m_proxy is the
+    # headline C3/C4 comparison number — the full Farquhar A-Cc fit
+    # against LI-COR data lands in PR #13b.
+    MetricDef(
+        key="co2_g_m_proxy",
+        label="g_m (葉肉コンダクタンス近似)",
+        unit="mol/(m²·s·Pa)",
+        analysis_kind="co2_diffusion",
+        path=("g_m_proxy",),
+    ),
+    MetricDef(
+        key="co2_cc_mean_pa",
+        label="Cc 平均 (葉緑体 CO2)",
+        unit="Pa",
+        analysis_kind="co2_diffusion",
+        path=("cc_mean_pa",),
+    ),
+    MetricDef(
+        key="co2_drawdown_mean_pa",
+        label="CO2 降下 平均",
+        unit="Pa",
+        analysis_kind="co2_diffusion",
+        path=("drawdown_mean_pa",),
+    ),
+    MetricDef(
+        key="co2_a_net",
+        label="A_net (同化速度近似)",
+        unit="mol/(s·m)",
+        analysis_kind="co2_diffusion",
+        path=("a_net",),
+    ),
 )
 METRICS_BY_KEY: dict[str, MetricDef] = {m.key: m for m in METRICS}
 
