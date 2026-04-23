@@ -440,21 +440,30 @@ def compute_darcy(
     # sign information; the headline K_leaf was meaningfully off as
     # a result.  The signed-flux form below matches conservation of
     # mass to machine precision.
+    # Non-Dirichlet leaf interior — used to gate the boundary-flux
+    # integration so Dirichlet↔Dirichlet faces (e.g. an unlikely
+    # xylem-touches-stomata case after down-sampling) don't get
+    # counted as a BC-to-BC shortcut that would inflate K_leaf.
+    interior_leaf = (leaf_mask > 0) & (~dirichlet)
+
     # Re-use the kx / ky face-conductivity grids built during assembly.
     def _boundary_outflow(mask_bool: np.ndarray) -> float:
         """Signed flux LEAVING `mask_bool` across faces it shares with
-        non-mask leaf cells (mask=True for the Dirichlet region; we
-        want flux from inside-mask out into the leaf interior)."""
+        a non-Dirichlet leaf interior cell (mask=True for the
+        Dirichlet region in question; the opposite side must lie in
+        `interior_leaf` so a touching second BC doesn't pollute the
+        sum)."""
         total = 0.0
         # East-west faces: face (y, x) sits between cell (y, x) and
         # cell (y, x+1).  left_only means the left cell is in the
-        # mask and the right cell isn't — flux leaves the mask toward
-        # the right at rate K_face * (P_left - P_right).  right_only
-        # is the mirrored case with flux leaving the mask toward the
-        # left at rate K_face * (P_right - P_left).
+        # mask and the right cell is in the interior leaf — flux
+        # leaves the mask toward the right at rate K_face *
+        # (P_left - P_right).  right_only is the mirror case.
+        int_left = interior_leaf[:, :-1]
+        int_right = interior_leaf[:, 1:]
         left = mask_bool[:, :-1]
         right = mask_bool[:, 1:]
-        left_only = left & (~right)
+        left_only = left & int_right
         if left_only.any():
             total += float(
                 np.sum(
@@ -462,7 +471,7 @@ def compute_darcy(
                     * (pressure[:, :-1][left_only] - pressure[:, 1:][left_only])
                 )
             )
-        right_only = right & (~left)
+        right_only = right & int_left
         if right_only.any():
             total += float(
                 np.sum(
@@ -471,9 +480,11 @@ def compute_darcy(
                 )
             )
         # North-south faces, same logic along axis 0.
+        int_top = interior_leaf[:-1, :]
+        int_bottom = interior_leaf[1:, :]
         top = mask_bool[:-1, :]
         bottom = mask_bool[1:, :]
-        top_only = top & (~bottom)
+        top_only = top & int_bottom
         if top_only.any():
             total += float(
                 np.sum(
@@ -481,7 +492,7 @@ def compute_darcy(
                     * (pressure[:-1, :][top_only] - pressure[1:, :][top_only])
                 )
             )
-        bottom_only = bottom & (~top)
+        bottom_only = bottom & int_top
         if bottom_only.any():
             total += float(
                 np.sum(
@@ -526,16 +537,32 @@ def compute_darcy(
         single_bool = single_mask > 0
         # Flow ENTERING this stomatum = - signed flux LEAVING it.
         single_flow = -_boundary_outflow(single_bool)
-        # Mean velocity inside the stomatum is well-defined (Dirichlet
-        # forced P, K is local to the cell), so report v_mag's mean
-        # over the stomatum body rather than over an outer ring.
-        body_v = v_mag[single_bool]
-        body_v = body_v[np.isfinite(body_v)]
+        # Sample mean velocity in the leaf interior cells DIRECTLY
+        # adjacent to this stomatum (1-px outer ring intersected
+        # with non-Dirichlet leaf).  v_mag inside the stomatum body
+        # itself is dominated by the artificial Dirichlet gradient
+        # and was the same artefact excluded from the global
+        # velocity stats; sampling the adjacent interior gives a
+        # physically meaningful "what speed is water arriving at
+        # this stomatum" number.
+        single_outer = (
+            np.zeros((h, w), dtype=bool)
+        )
+        # Build the 1-cell outer ring without an OpenCV dependency
+        # (cheap, only 4 row-shifts on a small mask).
+        single_outer[:-1, :] |= single_bool[1:, :]
+        single_outer[1:, :] |= single_bool[:-1, :]
+        single_outer[:, :-1] |= single_bool[:, 1:]
+        single_outer[:, 1:] |= single_bool[:, :-1]
+        single_outer &= ~single_bool
+        single_outer &= interior_leaf
+        ring_v = v_mag[single_outer]
+        ring_v = ring_v[np.isfinite(ring_v)]
         per_stomatum.append(
             StomatumFlow(
                 centroid=[cx_orig, cy_orig],
                 flow=single_flow,
-                mean_velocity=float(body_v.mean()) if body_v.size else 0.0,
+                mean_velocity=float(ring_v.mean()) if ring_v.size else 0.0,
             )
         )
 
@@ -557,15 +584,21 @@ def compute_darcy(
     notes: list[str] = []
     if not has_vessel:
         notes.append("xylem_vessel polygons absent; used xylem as source boundary instead")
-    # Continuity check: relative imbalance between inflow and outflow
-    # should be small in steady state.  Flag if > 5 %.
+    # Continuity check: in steady state with the signed-face-flux
+    # integration the imbalance should sit at floating-point noise
+    # (1e-10 to 1e-8 relative).  Anything materially above 0.1 %
+    # likely means the solver hit a near-singular sub-domain — flag
+    # it so the operator looks rather than trusts the K_leaf number.
+    # Threshold tightened from 5% in round-2 since the old loose bound
+    # was set when the boundary integration used unsigned ring sums.
     if flow_in > 0 and flow_out > 0:
         imbalance = abs(flow_in - flow_out) / max(flow_in, flow_out)
-        if imbalance > 0.05:
+        if imbalance > 0.001:
             notes.append(
                 f"continuity imbalance between xylem inflow and stomata outflow "
-                f"is {imbalance:.1%}; expect < 5% in well-resolved runs — "
-                "increase max_side_px for a finer grid if needed"
+                f"is {imbalance:.2%}; expected near floating-point precision "
+                "with the discrete face-flux integration — likely a "
+                "near-singular subdomain or disconnected leaf region"
             )
 
     return DarcyResult(

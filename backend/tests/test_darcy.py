@@ -201,7 +201,11 @@ def test_k_leaf_matches_analytical_1d_conductance() -> None:
     length_m = (w - 6) * dx_m
     k_leaf_analytic = perm * cross_section_m / length_m
     assert res.k_leaf is not None
-    assert res.k_leaf == pytest.approx(k_leaf_analytic, rel=0.05)
+    # Tightened from rel=0.05 to rel=0.005 in round-2 — the discrete
+    # FV stencil reproduces the analytical 1D conductance to better
+    # than 0.5% on this grid, so a 5% loose tolerance would have
+    # masked face-count or length regressions.
+    assert res.k_leaf == pytest.approx(k_leaf_analytic, rel=0.005)
     # Steady-state continuity to floating-point precision: in this
     # 1D geometry flow_in == flow_out exactly (no numerical imbalance
     # from diagonal leaks in the old ring-integration).
@@ -211,6 +215,51 @@ def test_k_leaf_matches_analytical_1d_conductance() -> None:
         res.total_flow_in, res.total_flow_out
     )
     assert imbalance < 1e-6
+
+
+def test_dirichlet_touching_does_not_inflate_k_leaf() -> None:
+    """Xylem and stomata share a face plus there's a long interior
+    palisade path connecting them.  The BC-to-BC shortcut MUST be
+    excluded from the flow integration — only the interior path
+    contributes to K_leaf.  An old buggy version (no interior gating)
+    would have inflated K_leaf by the K_face_BC * shortcut-area
+    contribution, which is K_palisade * shortcut-area >> K_palisade *
+    interior-path conductance for our geometry.  Round-2 review
+    caught this gap.
+
+    Geometry:
+      xylem        : x=[0..2], y=[0..2]   (3-row tall tab)
+      stomata      : x=[3..4], y=[0..2]   (touches xylem at x=2/3 face)
+      palisade     : x=[0..w], y=[3..h]   (long horizontal interior path)
+
+    The interior path runs from xylem (x=0..2, y=0..2 reaches into
+    palisade y=3 below) all the way around to stomata (x=3..4, y=0..2
+    reaches palisade y=3 below).  Conductance of this path is bounded
+    by K_palisade * cross-section / length.
+    """
+    h, w = 30, 50
+    polygons = [
+        _rect(0, 3, w, h, "palisade"),  # interior path
+        _rect(0, 0, 3, 3, "xylem"),     # xylem top-left
+        _rect(3, 0, 5, 3, "stomata"),   # stomata adjacent to xylem
+    ]
+    seg = _segformer_blob(polygons, h=h, w=w)
+    res = compute_darcy(seg, um_per_px=1.0, max_side_px=w)
+    # K_leaf must reflect only the interior path.  Computing it
+    # exactly is awkward (the path is L-shaped), so assert an upper
+    # bound: the BC-shortcut face would contribute
+    # K_face(xylem ∩ stomata) * face_length, which is roughly
+    # 0.5 * (K_xylem + K_stomata) ≈ K_xylem/2 = 5.6e-9 for a
+    # 3-cell shared face.  The interior palisade path has
+    # conductance ≈ K_palisade * h * dx / w ≈ 1.1e-11 * 30e-6 / 50e-6
+    # ≈ 6.7e-12, FOUR orders of magnitude smaller.  So as long as
+    # K_leaf is well below 1e-9 we know the BC shortcut is excluded.
+    assert res.k_leaf is not None
+    assert res.k_leaf > 0
+    assert res.k_leaf < 1.0e-10, (
+        f"K_leaf={res.k_leaf:.2e} suggests the BC-to-BC shortcut "
+        f"face is being counted; expected < 1e-10 (interior path only)"
+    )
 
 
 def test_higher_permeability_raises_flow() -> None:
