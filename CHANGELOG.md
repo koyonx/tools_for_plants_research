@@ -6,7 +6,29 @@ hasn't tagged a release yet, so everything below is on `main`.
 
 ## [Unreleased]
 
-### PR #12 — Darcy 水流 PDE ソルバ (current)
+### PR #13a — CO2 反応拡散 PDE ソルバ (current)
+- `backend/app/pipeline/co2_diffusion.py`: 定常反応拡散方程式
+  `∇·(D∇C) - r·C = 0` を有限体積で解く。Dirichlet BC は気孔で C=Ci、
+  反応項 r·C は葉緑体セル (または葉肉セル) で有効。scipy.sparse +
+  spsolve、harmonic-mean face conductivity、signed 面フラックスで
+  A_net と g_m_proxy = A_net / (Ci - Cc) を算出。
+- `backend/app/api/co2_diffusion.py`: `POST /images/{id}/analyze/co2-diffusion`
+  + バックグラウンド solve。segformer_tissue 完了が必須、
+  co2_morphometrics はオプション (あれば葉緑体オーバーレイを吸収域
+  に使用、無ければ葉肉細胞フォールバック)。
+- `batches.py`: `co2_diffusion` を SUPPORTED_KINDS / _PIPELINE_EXEC_ORDER
+  に追加 (co2_morphometrics の後、最終)。
+- `compare.py`: 4 メトリクス追加 (g_m_proxy, cc_mean_pa,
+  drawdown_mean_pa, a_net)。
+- `Co2DiffusionPanel.tsx` を画像詳細ページに搭載 (CO₂ morphometrics
+  の下)。濃度場 ↔ 降下場トグル、気孔別降下量を半径エンコード可視化。
+- 13 pytest ケース: ヘッダー入力バリデーション、pure Fick (r=0)
+  → uniform Ci、反応 → Cc < Ci、monotonicity (r 増加で drawdown 増加)、
+  override sanitisation、葉緑体オーバーレイ使用、気孔別降下、
+  Dirichlet 隣接の flux gating、strict JSON。
+- PR #13b で Farquhar A-Cc fit + LI-COR 実測との突き合わせを追加予定。
+
+### PR #12 — Darcy 水流 PDE ソルバ
 - `backend/app/pipeline/darcy.py`: 葉組織マスクを境界条件に
   steady-state Darcy: ∇·(K∇P)=0 を有限体積で解く。scipy.sparse
   + spsolve、harmonic-mean face conductivity (組織境界の K

@@ -16,6 +16,7 @@ const PIPELINE_CHOICES: { key: string; label: string }[] = [
   { key: "water_path", label: "水経路（要 SegFormer）" },
   { key: "darcy_flow", label: "Darcy 水流ソルバ（要 SegFormer）" },
   { key: "co2_morphometrics", label: "CO₂形態パラメータ（要 SegFormer + Cellpose）" },
+  { key: "co2_diffusion", label: "CO₂拡散 PDE（要 SegFormer / CO₂形態推奨）" },
 ];
 
 type Props = {
