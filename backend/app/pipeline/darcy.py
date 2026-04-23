@@ -323,9 +323,6 @@ def compute_darcy(
     # ----- assemble sparse system -----------------------------------
     n = h * w
 
-    def idx(y: int, x: int) -> int:
-        return y * w + x
-
     # Harmonic-mean face conductivity between cell (y,x) and (y',x').
     # The 2/(1/a + 1/b) form vanishes when either side is tiny — that's
     # the property we rely on to push no-flow at the BACKGROUND interface.
@@ -427,25 +424,80 @@ def compute_darcy(
         velocity_mean = velocity_p95 = velocity_max = None
 
     # ----- integrated flows -----------------------------------------
-    # Flow OUT of xylem = sum of (v · n̂) over the OUTER face of the
-    # xylem region, which we approximate as Σ v_mag over cells where
-    # the xylem mask transitions to non-xylem (1-px outer ring of
-    # xylem), scaled by dx_m (per-metre-depth integral).  Symmetric
-    # logic for sinks at the stomata boundary.
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    src_outer = cv2.bitwise_and(
-        cv2.dilate(source_mask, kernel), cv2.bitwise_not(source_mask)
-    )
-    snk_outer = cv2.bitwise_and(
-        cv2.dilate(sink_mask, kernel), cv2.bitwise_not(sink_mask)
-    )
-    # Total flow in / out, as a scalar magnitude integral over the
-    # one-pixel boundary ring.  Signs are implicit: xylem ring has
-    # flow LEAVING the xylem (positive outward); stomata ring has
-    # flow ENTERING the stomata (positive inward).  In steady state
-    # these are equal up to numerical residual.
-    flow_in = float(v_mag[src_outer > 0].sum()) * dx_m
-    flow_out = float(v_mag[snk_outer > 0].sum()) * dx_m
+    # Boundary flux = sum of SIGNED NORMAL face fluxes across each
+    # face that separates a Dirichlet cell from a non-Dirichlet leaf
+    # neighbour.  Per face the finite-volume flux is
+    #
+    #     q_face = K_face * (P_dirichlet - P_neighbor)
+    #
+    # which is the discrete Darcy law on a unit-length face (dx
+    # cancels the gradient denominator against the face area in 2-D
+    # per-metre-depth).  Summing over a leaving boundary gives a
+    # SIGNED outflow in m^2/s — positive when flow exits the source
+    # / enters the sink, negative if the gradient is reversed for
+    # debugging.  The earlier `Σ |v_mag| · dx` approximation mixed
+    # tangential velocity, included background-ring cells, and lost
+    # sign information; the headline K_leaf was meaningfully off as
+    # a result.  The signed-flux form below matches conservation of
+    # mass to machine precision.
+    # Re-use the kx / ky face-conductivity grids built during assembly.
+    def _boundary_outflow(mask_bool: np.ndarray) -> float:
+        """Signed flux LEAVING `mask_bool` across faces it shares with
+        non-mask leaf cells (mask=True for the Dirichlet region; we
+        want flux from inside-mask out into the leaf interior)."""
+        total = 0.0
+        # East-west faces: face (y, x) sits between cell (y, x) and
+        # cell (y, x+1).  left_only means the left cell is in the
+        # mask and the right cell isn't — flux leaves the mask toward
+        # the right at rate K_face * (P_left - P_right).  right_only
+        # is the mirrored case with flux leaving the mask toward the
+        # left at rate K_face * (P_right - P_left).
+        left = mask_bool[:, :-1]
+        right = mask_bool[:, 1:]
+        left_only = left & (~right)
+        if left_only.any():
+            total += float(
+                np.sum(
+                    kx[left_only]
+                    * (pressure[:, :-1][left_only] - pressure[:, 1:][left_only])
+                )
+            )
+        right_only = right & (~left)
+        if right_only.any():
+            total += float(
+                np.sum(
+                    kx[right_only]
+                    * (pressure[:, 1:][right_only] - pressure[:, :-1][right_only])
+                )
+            )
+        # North-south faces, same logic along axis 0.
+        top = mask_bool[:-1, :]
+        bottom = mask_bool[1:, :]
+        top_only = top & (~bottom)
+        if top_only.any():
+            total += float(
+                np.sum(
+                    ky[top_only]
+                    * (pressure[:-1, :][top_only] - pressure[1:, :][top_only])
+                )
+            )
+        bottom_only = bottom & (~top)
+        if bottom_only.any():
+            total += float(
+                np.sum(
+                    ky[bottom_only]
+                    * (pressure[1:, :][bottom_only] - pressure[:-1, :][bottom_only])
+                )
+            )
+        return total
+
+    source_bool = source_mask > 0
+    sink_bool = sink_mask > 0
+    flow_in = _boundary_outflow(source_bool)
+    # `_boundary_outflow(sink)` returns flux LEAVING sink — water
+    # entering sink from leaf = - that.  Negate to keep both numbers
+    # positive in the typical configuration (P_xylem > P_stomata).
+    flow_out = -_boundary_outflow(sink_bool)
 
     pressure_drop = abs(p_xylem_pa - p_stomata_pa)
     k_leaf: float | None
@@ -454,9 +506,9 @@ def compute_darcy(
     else:
         k_leaf = None
 
-    # Per-stomatum outflow: slice v_mag by each individual stomata
-    # polygon's outer ring so the C4 bundle-sheath story (uneven
-    # stomatal loading) can be read off directly.
+    # Per-stomatum outflow: same signed-flux integration but masked
+    # to each individual stomata polygon, so the C4 bundle-sheath
+    # story (uneven stomatal loading) can be read off directly.
     stomata_polygons = [p for p in polygons if p.get("class_key") == "stomata"]
     per_stomatum: list[StomatumFlow] = []
     for poly in stomata_polygons:
@@ -471,20 +523,19 @@ def compute_darcy(
         pts[:, 0] = np.clip(pts[:, 0], 0, w - 1)
         pts[:, 1] = np.clip(pts[:, 1], 0, h - 1)
         cv2.fillPoly(single_mask, [pts.reshape(-1, 1, 2)], color=(255,))
-        single_outer = cv2.bitwise_and(
-            cv2.dilate(single_mask, kernel), cv2.bitwise_not(single_mask)
-        )
-        band = v_mag[single_outer > 0]
-        if band.size == 0:
-            continue
-        finite_band = band[np.isfinite(band)]
-        if finite_band.size == 0:
-            continue
+        single_bool = single_mask > 0
+        # Flow ENTERING this stomatum = - signed flux LEAVING it.
+        single_flow = -_boundary_outflow(single_bool)
+        # Mean velocity inside the stomatum is well-defined (Dirichlet
+        # forced P, K is local to the cell), so report v_mag's mean
+        # over the stomatum body rather than over an outer ring.
+        body_v = v_mag[single_bool]
+        body_v = body_v[np.isfinite(body_v)]
         per_stomatum.append(
             StomatumFlow(
                 centroid=[cx_orig, cy_orig],
-                flow=float(finite_band.sum()) * dx_m,
-                mean_velocity=float(finite_band.mean()),
+                flow=single_flow,
+                mean_velocity=float(body_v.mean()) if body_v.size else 0.0,
             )
         )
 

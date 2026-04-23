@@ -163,6 +163,56 @@ def test_homogeneous_slab_matches_1d_darcy_law() -> None:
     assert imbalance < 0.1
 
 
+def test_k_leaf_matches_analytical_1d_conductance() -> None:
+    """Round-1 review caught that the original flow integration used
+    |v_mag| on a dilated ring, polluting K_leaf with tangential
+    velocity and background cells.  After switching to signed normal
+    face flux, K_leaf for a 1D slab must match the analytical
+    conductance to machine precision (steady-state continuity
+    holds exactly on the discrete stencil).
+
+    Analytical form for a pure-palisade slab of length L and
+    cross-section A per metre depth (== h * dx_m):
+
+        flow_out = K_palisade * A * ΔP / L
+        K_leaf   = flow_out / ΔP = K_palisade * A / L
+    """
+    h, w = 20, 200
+    polygons = [
+        _rect(0, 0, w, h, "palisade"),
+        _rect(0, 0, 3, h, "xylem"),
+        _rect(w - 3, 0, w, h, "stomata"),
+    ]
+    seg = _segformer_blob(polygons, h=h, w=w)
+    p_in = 0.0
+    p_out = -1.0e6
+    res = compute_darcy(
+        seg,
+        um_per_px=1.0,
+        max_side_px=w,
+        p_xylem_pa=p_in,
+        p_stomata_pa=p_out,
+    )
+    dx_m = 1e-6
+    perm = DEFAULT_PERMEABILITY["palisade"] / WATER_VISCOSITY_PA_S
+    # Cross-section = h rows * 1-m depth; length = interior palisade
+    # columns between the xylem band (0..2) and the sink band (w-3..w-1).
+    cross_section_m = h * dx_m
+    length_m = (w - 6) * dx_m
+    k_leaf_analytic = perm * cross_section_m / length_m
+    assert res.k_leaf is not None
+    assert res.k_leaf == pytest.approx(k_leaf_analytic, rel=0.05)
+    # Steady-state continuity to floating-point precision: in this
+    # 1D geometry flow_in == flow_out exactly (no numerical imbalance
+    # from diagonal leaks in the old ring-integration).
+    assert res.total_flow_in > 0
+    assert res.total_flow_out > 0
+    imbalance = abs(res.total_flow_in - res.total_flow_out) / max(
+        res.total_flow_in, res.total_flow_out
+    )
+    assert imbalance < 1e-6
+
+
 def test_higher_permeability_raises_flow() -> None:
     """Double the palisade permeability → flow through the slab
     doubles (linear in K for a fixed pressure drop)."""

@@ -132,13 +132,19 @@ async def _run_darcy_bg(
     try:
         from app.pipeline.darcy import compute_darcy
 
+        # Use `is None` checks, not `or`, so a legitimate 0.0 for
+        # p_xylem_pa (or similar) doesn't get silently swapped with
+        # the default via Python's falsiness on 0.0.
+        max_side = parameters.get("max_side_px")
+        p_xy = parameters.get("p_xylem_pa")
+        p_st = parameters.get("p_stomata_pa")
         result = await asyncio.to_thread(
             compute_darcy,
             seg_result,
             um_per_px=parameters.get("um_per_px"),
-            max_side_px=int(parameters.get("max_side_px") or 1024),
-            p_xylem_pa=float(parameters.get("p_xylem_pa") or 0.0),
-            p_stomata_pa=float(parameters.get("p_stomata_pa") or -1.0e6),
+            max_side_px=int(max_side) if max_side is not None else 1024,
+            p_xylem_pa=float(p_xy) if p_xy is not None else 0.0,
+            p_stomata_pa=float(p_st) if p_st is not None else -1.0e6,
             permeability_override=parameters.get("permeability_override"),
         )
         await sb.update_analysis(
