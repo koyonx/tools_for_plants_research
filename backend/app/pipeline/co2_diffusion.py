@@ -518,8 +518,12 @@ def compute_co2_diffusion(
     # CO2 flowing INTO the sink region = - signed flux LEAVING it.
     # Units: mol / (s · m-depth), since dx_m in the face-flux formula
     # cancels the discrete gradient denominator against the face area
-    # in 2-D extruded 1 metre into depth.
-    a_net = -_boundary_outflow(sink_bool)
+    # in 2-D extruded 1 metre into depth.  Use `sink_interior` (sink
+    # cells explicitly excluding any Dirichlet overlap) so a
+    # pathological chloroplast overlay that clips a stomatum pixel
+    # doesn't distort A_net by adding a Dirichlet cell to the mask.
+    # Round-2 review caught this as a cheap defensive gate.
+    a_net = -_boundary_outflow(sink_interior)
 
     # Conservation cross-check.  In steady state with reaction,
     # stomata_supply = a_net + r * sum(C in sink) * dx_m^2 (supply
@@ -528,10 +532,14 @@ def compute_co2_diffusion(
     # stomata_supply / a_net == 1 is wrong once the reaction is
     # non-trivial; the correct check is
     # stomata_supply ≈ a_net + reaction_volume_integral.
+    #
+    # Use `sink_interior` for the volume integral too: a Dirichlet
+    # cell that happened to overlap the chloroplast mask would be
+    # pinned at C=Ci and inflate the reaction integral spuriously.
     stomata_supply = _boundary_outflow(dirichlet)  # flux LEAVING stomata = supply
     reaction_volume_integral = (
-        reaction_rate * float(concentration[sink_bool].sum()) * dx_m * dx_m
-        if sink_bool.any() and reaction_rate > 0
+        reaction_rate * float(concentration[sink_interior].sum()) * dx_m * dx_m
+        if sink_interior.any() and reaction_rate > 0
         else 0.0
     )
     notes: list[str] = []

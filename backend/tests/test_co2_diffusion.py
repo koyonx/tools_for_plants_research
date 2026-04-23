@@ -361,25 +361,28 @@ def test_g_m_proxy_matches_analytical_fickian_conductance() -> None:
         ci_pa=25.0,
         reaction_rate=1e6,  # huge r → sink band ≈ C=0 (Dirichlet-like)
     )
+    # leaf_section_length_m should be the grid-x extent in metres.
+    # minAreaRect major axis on a w*h grid with w > h is w px.
+    # At um_per_px=1.0 and factor=1.0, that's 100 * 1e-6 = 1e-4 m.
+    # Round-2 review: pin this explicitly so a bug in
+    # _leaf_section_length_m can't hide behind the wider g_m bracket.
+    assert res.leaf_section_length_m == pytest.approx(1.0e-4, rel=0.05)
     # Expected order-of-magnitude: g_m_proxy ≈ D_IAS / L_m.  L is
     # the leaf section length (minAreaRect major axis) in metres.
     # D_IAS ≈ 1.6e-5 m²/s, L ≈ 1e-4 m → g_m ~ 1.6e-1 mol/(m²·s·Pa).
-    # Sanity-check that the magnitude lands within an order of 1e-1
-    # and NOT at the un-normalised 1e3 or 1e-6 extremes that a sign
-    # or scale bug would produce.
+    # Tightened bracket from D/100..D to D/10..D (one order of
+    # magnitude) so a wrong normalisation can't slip through.  The
+    # reaction-band BC approximation makes an exact match
+    # inappropriate but one-order precision is achievable here.
     assert res.g_m_proxy is not None
     d_ias = DEFAULT_DIFFUSIVITY["intercellular"]
-    # Loose upper bound: gas-phase D_IAS / L; loose lower bound:
-    # 1/100 of that (allowing for the non-ideal reaction-band BC).
     upper = d_ias / res.leaf_section_length_m
-    lower = upper / 100.0
+    lower = upper / 10.0
     assert lower < res.g_m_proxy < upper, (
         f"g_m_proxy={res.g_m_proxy:.3e} outside expected Fickian "
         f"range [{lower:.3e}, {upper:.3e}] — likely unit or "
         "normalisation bug"
     )
-    # leaf_section_length_m should be on the order of the grid size.
-    assert res.leaf_section_length_m > 0
 
 
 def test_non_finite_solver_values_surface_in_notes() -> None:
