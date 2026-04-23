@@ -91,7 +91,13 @@ export type Co2DiffusionResult = {
   cc_mean_pa: number | null;
   drawdown_mean_pa: number | null;
   drawdown_max_pa: number | null;
+  // CO2 flux integrated into the sink in mol/(s·m) per-metre-depth.
   a_net: number;
+  // Leaf section length in metres — denominator used to turn the
+  // per-metre-depth flux into per-unit-leaf-area flux for g_m.
+  leaf_section_length_m: number;
+  // Area-normalised ad-hoc mesophyll conductance
+  // = A_net / (leaf_section_length · (Ci - Cc))   [mol/(m²·s·Pa)]
   g_m_proxy: number | null;
   stomata_drawdowns: Co2StomatumDrawdown[];
   concentration_png_base64: string;

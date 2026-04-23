@@ -102,10 +102,18 @@ class Co2DiffusionResult:
     drawdown_mean_pa: float | None
     drawdown_max_pa: float | None
     a_net: float                  # total CO2 fixed in the chloroplast region
-                                  # [mol per m-depth per s]
+                                  # [mol / (s · m-depth)]  (2-D per-metre-depth
+                                  # integral of the signed face flux; divide
+                                  # by leaf_section_length_m below to turn it
+                                  # into an area-normalised flux).
+    leaf_section_length_m: float  # major axis of the leaf cross-section in
+                                  # metres — the denominator used to turn the
+                                  # per-metre-depth flux into a per-unit-leaf-
+                                  # area flux for g_m.
     g_m_proxy: float | None       # ad-hoc mesophyll conductance
+                                  # = A_net / (leaf_length · (Ci - Cc))
                                   # [mol m^-2 s^-1 Pa^-1]; PR #13b adds the
-                                  # full Farquhar fit.
+                                  # full Farquhar A-Cc fit.
     stomata_drawdowns: list[StomatumDrawdown] = field(default_factory=list)
     concentration_png_base64: str = ""
     drawdown_png_base64: str = ""
@@ -161,6 +169,24 @@ def _heatmap_to_png_base64(
     if not ok:
         return ""
     return base64.b64encode(bytes(buf.tobytes())).decode("ascii")
+
+
+def _leaf_section_length_m(leaf_mask: np.ndarray, dx_m: float) -> float:
+    """Leaf section length in metres — the denominator that turns the
+    2-D per-metre-depth flux (mol/(s·m)) into a per-unit-leaf-area
+    flux (mol/(m²·s)), which is what the standard g_m definition
+    requires.  Uses the major axis of the minimum-area rectangle
+    around the leaf mask so the measurement is rotation-invariant
+    (same helper idea as morphometrics_co2's section_length)."""
+    ys, xs = np.where(leaf_mask > 0)
+    if xs.size == 0:
+        return 0.0
+    if xs.size < 3:
+        return float(xs.max() - xs.min() + 1) * dx_m
+    pts = np.column_stack([xs, ys]).astype(np.float32)
+    rect = cv2.minAreaRect(pts)
+    (_cx, _cy), (rw, rh), _angle = rect
+    return float(max(rw, rh)) * dx_m
 
 
 def _sanitise_overrides(
@@ -400,11 +426,17 @@ def compute_co2_diffusion(
     except Exception as exc:
         raise RuntimeError(f"CO2 diffusion solve failed: {exc}") from exc
     concentration = c_flat.reshape(h, w)
-    concentration = np.where(np.isfinite(concentration), concentration, ci_pa)
 
-    # Clip negative concentrations (sub-zero CO2 has no physical
-    # meaning; small overshoots from the solver near sharp BCs land
-    # at 0 here so downstream stats stay sensible).
+    # Track solver quality indicators so a silently-unstable solve
+    # surfaces in the `notes` field instead of hiding behind plausible
+    # heatmaps (codex round-1 MINOR — non-finite / negative leakage).
+    n_non_finite = int((~np.isfinite(concentration)).sum())
+    concentration = np.where(np.isfinite(concentration), concentration, ci_pa)
+    min_raw = float(concentration.min())
+    n_negative = int((concentration < 0).sum())
+    # Clip negative concentrations.  Small overshoots from sharp BCs
+    # land at 0 here so downstream stats stay sensible; sizeable
+    # negatives get flagged via the notes list below.
     concentration = np.clip(concentration, 0.0, None)
 
     # ----- aggregates -----------------------------------------------
@@ -484,26 +516,67 @@ def compute_co2_diffusion(
         return total
 
     # CO2 flowing INTO the sink region = - signed flux LEAVING it.
+    # Units: mol / (s · m-depth), since dx_m in the face-flux formula
+    # cancels the discrete gradient denominator against the face area
+    # in 2-D extruded 1 metre into depth.
     a_net = -_boundary_outflow(sink_bool)
-    # Conservation cross-check: total in via stomata == total fixed
-    # in chloroplast, up to the reaction term integrated over the
-    # sink area.  Reaction integral = r * sum(C in sink) * dx_m^2.
-    # We don't currently surface this explicitly but use it for the
-    # continuity note below.
-    stomata_supply = _boundary_outflow(dirichlet)  # flux LEAVING stomata = supply
-    notes: list[str] = []
-    if abs(stomata_supply) > 0:
-        ratio = a_net / stomata_supply if stomata_supply != 0 else 1.0
-        if not (0.95 < ratio < 1.05):
-            notes.append(
-                f"a_net / stomata_supply = {ratio:.3f}; expect ~1.0 in "
-                "well-resolved cases — increase max_side_px if the imbalance "
-                "is large or check that the chloroplast mask covers all "
-                "consuming cells"
-            )
 
-    if cc_mean is not None and (ci_pa - cc_mean) > 0 and a_net > 0:
-        g_m_proxy: float | None = a_net / (ci_pa - cc_mean)
+    # Conservation cross-check.  In steady state with reaction,
+    # stomata_supply = a_net + r * sum(C in sink) * dx_m^2 (supply
+    # must cover both the flux OUT of the leaf via the sink AND the
+    # mass consumed by the reaction inside the sink).  So expecting
+    # stomata_supply / a_net == 1 is wrong once the reaction is
+    # non-trivial; the correct check is
+    # stomata_supply ≈ a_net + reaction_volume_integral.
+    stomata_supply = _boundary_outflow(dirichlet)  # flux LEAVING stomata = supply
+    reaction_volume_integral = (
+        reaction_rate * float(concentration[sink_bool].sum()) * dx_m * dx_m
+        if sink_bool.any() and reaction_rate > 0
+        else 0.0
+    )
+    notes: list[str] = []
+    if stomata_supply > 0:
+        expected_supply = a_net + reaction_volume_integral
+        imbalance = (
+            abs(stomata_supply - expected_supply) / stomata_supply
+            if stomata_supply > 0
+            else 0.0
+        )
+        if imbalance > 0.01:
+            notes.append(
+                f"stomata supply vs (a_net + r * integral) imbalance = "
+                f"{imbalance:.2%}; expected near machine precision with "
+                "the signed face-flux integration.  Check the chloroplast "
+                "mask covers all consuming cells or increase max_side_px."
+            )
+    if n_non_finite > 0:
+        notes.append(
+            f"solver produced {n_non_finite} non-finite pixels; replaced "
+            "with Ci.  This usually means the matrix was near-singular — "
+            "check that stomata are not isolated from the leaf interior."
+        )
+    if n_negative > 0 or min_raw < -1e-3:
+        notes.append(
+            f"solver produced {n_negative} negative pixels (min={min_raw:.3e} Pa); "
+            "clipped to 0.  Small overshoots near sharp BCs are normal; large "
+            "negatives suggest the reaction rate is too strong for the grid."
+        )
+
+    # g_m_proxy in standard area-normalised units:
+    #     g_m_proxy = A_net / (leaf_section_length · (Ci - Cc))
+    #               [mol / (s · m)]    /    (m · Pa)
+    #               = mol / (m^2 · s · Pa)
+    # matches the textbook g_m definition.  Round-1 review caught that
+    # the un-normalised form A_net/(Ci - Cc) had units mol/(s·m·Pa),
+    # which is NOT g_m — needed cross-section-length normalisation.
+    leaf_section_length_m_val = _leaf_section_length_m(leaf_mask, dx_m)
+    if (
+        cc_mean is not None
+        and (ci_pa - cc_mean) > 0
+        and a_net > 0
+        and leaf_section_length_m_val > 0
+    ):
+        g_m_proxy: float | None = a_net / (leaf_section_length_m_val * (ci_pa - cc_mean))
     else:
         g_m_proxy = None
         if cc_mean is not None and (ci_pa - cc_mean) <= 0:
@@ -550,14 +623,22 @@ def compute_co2_diffusion(
             )
             continue
         cc_local = float(concentration[single_outer].mean())
+        # `_boundary_outflow(single_bool)` with single_bool being the
+        # Dirichlet stomatum mask returns the SIGNED flux LEAVING the
+        # stomatum.  In normal photosynthesis the gradient points from
+        # stomata (C=Ci, high) into leaf (C<Ci, low), so flux leaves
+        # the stomatum → positive.  `flow_in` names the same quantity
+        # from the LEAF's frame of reference: CO2 flowing INTO the
+        # leaf via this stomatum.  They have the same sign and same
+        # magnitude, so we report the raw outflow directly (no negation
+        # — the round-1 nit was that the previous code negated it but
+        # the comment described it as supply leaving the stomatum).
         per_stomatum.append(
             StomatumDrawdown(
                 centroid=[cx_orig, cy_orig],
                 cc_mean_pa=cc_local,
                 drawdown_pa=ci_pa - cc_local,
-                # Net CO2 flow LEAVING the stomatum into the leaf ==
-                # supply.  In normal config this is positive.
-                flow_in=-_boundary_outflow(single_bool),
+                flow_in=_boundary_outflow(single_bool),
             )
         )
 
@@ -580,6 +661,7 @@ def compute_co2_diffusion(
         drawdown_mean_pa=drawdown_mean,
         drawdown_max_pa=drawdown_max,
         a_net=a_net,
+        leaf_section_length_m=leaf_section_length_m_val,
         g_m_proxy=g_m_proxy,
         stomata_drawdowns=per_stomatum,
         concentration_png_base64=concentration_png,
