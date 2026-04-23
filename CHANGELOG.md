@@ -6,7 +6,36 @@ hasn't tagged a release yet, so everything below is on `main`.
 
 ## [Unreleased]
 
-### PR #11 — LI-COR ガス交換ファイル取り込み (current)
+### PR #12 — Darcy 水流 PDE ソルバ (current)
+- `backend/app/pipeline/darcy.py`: 葉組織マスクを境界条件に
+  steady-state Darcy: ∇·(K∇P)=0 を有限体積で解く。scipy.sparse
+  + spsolve、harmonic-mean face conductivity (組織境界の K
+  不連続を正しく扱う)、Dirichlet BC を xylem (P_xylem) と stomata
+  (P_stomata) に課し leaf 外は no-flow。出力: 圧力場 PNG、流速場
+  PNG、K_leaf (kg/(s·Pa·m))、平均/95%tile/最大流速、xylem→stomata
+  総流量 (連続性チェック付き)、気孔別流出量。
+- `backend/app/api/darcy.py`: `POST /images/{id}/analyze/darcy` +
+  バックグラウンド solve。`segformer_tissue` 完了が前提。BC圧力
+  と per-class permeability override を受け付け、サニタイズ後
+  スレッドプールで実行。
+- `batches.py`: `darcy_flow` を `SUPPORTED_KINDS` /
+  `_PIPELINE_EXEC_ORDER` に追加 (water_path の後、co2_morphometrics
+  の前)。バッチ dispatcher 経由でも実行可能。
+- `compare.py`: 5 つの新メトリクス (`darcy_k_leaf`,
+  `darcy_mean_velocity`, `darcy_p95_velocity`,
+  `darcy_total_flow_out`, `darcy_pressure_drop_pa`) を METRICS
+  カタログに追加。`metrics` フィールドの max_length を 20 → 40
+  に拡張。
+- `DarcyPanel.tsx` を画像詳細ページに搭載 (water_path の下、CO₂
+  morphometrics の上)。圧力場 ↔ 流速場のトグル付きオーバーレイ、
+  気孔別流出量を半径エンコードで可視化、結果テーブル。
+- `ImageBatchPicker` の pipeline チェックボックスに追加。
+- 13 pytest ケース: 1D 解析解 (Darcy 法則) との一致 (rel<10%)、
+  permeability スケール線形性、xylem_vessel/xylem fallback、
+  ambiguous 入力エラー、strict JSON ラウンドトリップ、気孔別
+  流出量レポート、悪い override の silent drop。
+
+### PR #11 — LI-COR ガス交換ファイル取り込み
 - `backend/app/pipeline/licor_parse.py`: 機種・列レイアウト自動判定式
   パーサー。LI-6400 / LI-6800 .xlsx 双方 + 任意の CSV/TSV を対応。
   ヘッダー行は既知エイリアス (Photo/A/Cond/gsw/Ci/...) のスコア最高行

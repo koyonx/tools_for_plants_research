@@ -37,6 +37,7 @@ SUPPORTED_KINDS = (
     "cellpose_cells",
     "segformer_tissue",
     "water_path",
+    "darcy_flow",
     "co2_morphometrics",
 )
 PipelineKind = Literal[
@@ -44,20 +45,22 @@ PipelineKind = Literal[
     "cellpose_cells",
     "segformer_tissue",
     "water_path",
+    "darcy_flow",
     "co2_morphometrics",
 ]
 
 # Topological execution order: later entries may depend on earlier ones.
-# (water_path needs segformer_tissue; co2_morphometrics needs BOTH
-# segformer_tissue and cellpose_cells; basic_measurement provides the
-# µm/px scale.)  We sort by this order regardless of what the client
-# sent, so `Set`-iteration on the frontend can't produce a broken
-# schedule.
+# (water_path + darcy_flow need segformer_tissue; co2_morphometrics
+# needs BOTH segformer_tissue and cellpose_cells; basic_measurement
+# provides the µm/px scale.)  We sort by this order regardless of
+# what the client sent, so `Set`-iteration on the frontend can't
+# produce a broken schedule.
 _PIPELINE_EXEC_ORDER: tuple[str, ...] = (
     "basic_measurement",
     "cellpose_cells",
     "segformer_tissue",
     "water_path",
+    "darcy_flow",
     "co2_morphometrics",
 )
 
@@ -359,6 +362,46 @@ async def _run_pipeline(
                     "um_per_px": um_per_px,
                 },
                 "result": water_result.to_dict(),
+            }
+        )
+        return str(row["id"])
+
+    if kind == "darcy_flow":
+        # Same prerequisite as water_path (segformer_tissue done) plus
+        # an optional µm/px scale from basic_measurement so velocities
+        # come out in m/s rather than dimensionless.
+        from app.pipeline.darcy import compute_darcy
+
+        seg = await sb.latest_analysis_for(image_id, "segformer_tissue", status="done")
+        if seg is None or not isinstance(seg.get("result"), dict):
+            raise RuntimeError(
+                "darcy_flow requires a prior segformer_tissue run on the same image"
+            )
+        basic = await sb.latest_analysis_for(image_id, "basic_measurement", status="done")
+        darcy_um_per_px: float | None = image.get("scale_um_per_px")
+        if not darcy_um_per_px and isinstance(basic, dict):
+            darcy_basic_blob = basic.get("result")
+            if isinstance(darcy_basic_blob, dict):
+                s = (darcy_basic_blob.get("scale") or {}).get("um_per_px")
+                if isinstance(s, int | float) and s > 0:
+                    darcy_um_per_px = float(s)
+        darcy_result = await asyncio.to_thread(
+            compute_darcy,
+            seg["result"],
+            um_per_px=darcy_um_per_px,
+            max_side_px=int(params["max_side_px"]),
+        )
+        row = await sb.insert_analysis(
+            {
+                "image_id": image_id,
+                "kind": kind,
+                "status": "done",
+                "parameters": {
+                    "max_side_px": int(params["max_side_px"]),
+                    "source_segformer_id": seg["id"],
+                    "um_per_px": darcy_um_per_px,
+                },
+                "result": darcy_result.to_dict(),
             }
         )
         return str(row["id"])
