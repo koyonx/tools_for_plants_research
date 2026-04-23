@@ -183,6 +183,46 @@ METRICS: tuple[MetricDef, ...] = (
         analysis_kind="co2_morphometrics",
         path=("mesophyll", "thickness_median_um"),
     ),
+    # Darcy water-flow scalars (PR #12).  K_leaf in particular is
+    # the headline number: a physical hydraulic conductance that
+    # should differ measurably between C3 and C4 cohorts driven by
+    # mesophyll geometry differences, providing a complement to the
+    # morphology-only S_mes/S / f_ias metrics above.
+    MetricDef(
+        key="darcy_k_leaf",
+        label="K_leaf (葉水力コンダクタンス)",
+        unit="kg/(s·Pa·m)",
+        analysis_kind="darcy_flow",
+        path=("k_leaf",),
+    ),
+    MetricDef(
+        key="darcy_mean_velocity",
+        label="平均流速",
+        unit="m/s",
+        analysis_kind="darcy_flow",
+        path=("velocity_mean",),
+    ),
+    MetricDef(
+        key="darcy_p95_velocity",
+        label="流速 95%tile",
+        unit="m/s",
+        analysis_kind="darcy_flow",
+        path=("velocity_p95",),
+    ),
+    MetricDef(
+        key="darcy_total_flow_out",
+        label="総流出量 (気孔側)",
+        unit="kg/(s·m)",
+        analysis_kind="darcy_flow",
+        path=("total_flow_out",),
+    ),
+    MetricDef(
+        key="darcy_pressure_drop_pa",
+        label="圧力差 ΔP",
+        unit="Pa",
+        analysis_kind="darcy_flow",
+        path=("pressure_drop_pa",),
+    ),
 )
 METRICS_BY_KEY: dict[str, MetricDef] = {m.key: m for m in METRICS}
 
@@ -203,7 +243,10 @@ class GroupFilter(BaseModel):
 class CompareRequest(BaseModel):
     group_a: GroupFilter
     group_b: GroupFilter
-    metrics: list[str] = Field(..., min_length=1, max_length=20)
+    # Bumped from 20 to 40 in PR #12 (Darcy) — the METRICS catalog
+    # grew past 20 with the gas-exchange + darcy additions, and the
+    # dashboard should be able to request them all in one go.
+    metrics: list[str] = Field(..., min_length=1, max_length=40)
     bootstrap_iters: int = Field(default=2000, gt=100, le=20_000)
 
 

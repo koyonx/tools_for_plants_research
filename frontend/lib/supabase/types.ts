@@ -77,6 +77,36 @@ export type CompareResponse = {
   metrics: CompareMetricResult[];
 };
 
+// PR #12 — Darcy water-flow PDE solver
+export type DarcyStomatumFlow = {
+  centroid: [number, number];
+  flow: number; // kg / s per metre-depth
+  mean_velocity: number; // m/s
+};
+
+export type DarcyResult = {
+  source_class: "xylem_vessel" | "xylem";
+  sink_class: "stomata";
+  p_xylem_pa: number;
+  p_stomata_pa: number;
+  pressure_drop_pa: number;
+  pressure_min_pa: number | null;
+  pressure_max_pa: number | null;
+  velocity_mean: number | null;
+  velocity_p95: number | null;
+  velocity_max: number | null;
+  total_flow_in: number;
+  total_flow_out: number;
+  k_leaf: number | null;
+  stomata_outflows: DarcyStomatumFlow[];
+  pressure_png_base64: string;
+  velocity_png_base64: string;
+  heatmap_shape: [number, number];
+  downsample_factor: number;
+  permeability: Record<string, number>;
+  notes: string[];
+};
+
 // PR #11 — LI-COR gas-exchange ingestion
 export type GasExchangeInstrument = "li_6400" | "li_6800" | "generic_csv" | "unknown";
 

@@ -1,6 +1,7 @@
 import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { CellposePanel } from "@/components/CellposePanel";
 import { Co2MorphometricsPanel } from "@/components/Co2MorphometricsPanel";
+import { DarcyPanel } from "@/components/DarcyPanel";
 import { ImageMetadataEditor } from "@/components/ImageMetadataEditor";
 import { ImageViewer } from "@/components/ImageViewer";
 import { SegFormerPanel } from "@/components/SegFormerPanel";
@@ -84,6 +85,15 @@ export default async function ImageDetailPage({
     .select("*")
     .eq("image_id", image.id)
     .eq("kind", "co2_morphometrics")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<AnalysisRow>();
+
+  const { data: latestDarcy } = await supabase
+    .from("analyses")
+    .select("*")
+    .eq("image_id", image.id)
+    .eq("kind", "darcy_flow")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<AnalysisRow>();
@@ -188,6 +198,19 @@ export default async function ImageDetailPage({
           imageId={image.id}
           imageUrl={toPublicSupabaseUrl(signed.signedUrl)}
           initial={latestWaterPath ?? null}
+          hasSegformerResult={Boolean(
+            latestSegformer && latestSegformer.status === "done" && latestSegformer.result,
+          )}
+          canRun={isOwner}
+          imageWidth={image.width_px}
+          imageHeight={image.height_px}
+        />
+      )}
+      {signed?.signedUrl && image.width_px && image.height_px && (
+        <DarcyPanel
+          imageId={image.id}
+          imageUrl={toPublicSupabaseUrl(signed.signedUrl)}
+          initial={latestDarcy ?? null}
           hasSegformerResult={Boolean(
             latestSegformer && latestSegformer.status === "done" && latestSegformer.result,
           )}
