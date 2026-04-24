@@ -354,7 +354,7 @@ def fit_ethier_livingston(
             ],
         )
 
-    def _pointwise(a_s: np.ndarray, ci_s: np.ndarray, _: np.ndarray | None) -> float | None:
+    def _residual_builder(a_s: np.ndarray, ci_s: np.ndarray) -> Any:
         def _residual(params: np.ndarray) -> np.ndarray:
             vcmax, g_m = params
             pred = _predicted_a_net(
@@ -368,25 +368,31 @@ def fit_ethier_livingston(
                 constants=constants,
             )
             return (pred - a_s).astype(np.float64)  # type: ignore[no-any-return]
+        return _residual
 
-        # Multi-start: Ethier's Vcmax-g_m landscape has a degenerate
-        # ridge.  Try multiple (Vcmax, g_m) initial guesses spanning
-        # the physically-plausible range and keep the lowest-RMSE
-        # fit.  Boundary hits at the upper g_m bound are rejected —
-        # they mean the optimizer couldn't pin g_m (literature
-        # documents Ethier's poor identifiability without a Vcmax
-        # anchor).
-        gm_upper_bound = 10.0  # above any observed g_m in Ci-ppm units
-        best_g_m: float | None = None
-        best_rmse = float("inf")
-        init_grid = [
-            (40.0, 0.05), (60.0, 0.2), (80.0, 0.5),
-            (120.0, 1.0), (200.0, 0.1), (150.0, 0.3),
-        ]
+    # Multi-start: Ethier's Vcmax-g_m landscape has a degenerate
+    # ridge.  Try multiple (Vcmax, g_m) initial guesses spanning the
+    # physically-plausible range and keep the lowest-RMSE fit.
+    # Boundary hits at the g_m bounds are rejected — they signal the
+    # optimizer couldn't pin g_m (literature documents Ethier's poor
+    # identifiability without a Vcmax anchor).
+    gm_upper_bound = 10.0
+    init_grid = [
+        (40.0, 0.05), (60.0, 0.2), (80.0, 0.5),
+        (120.0, 1.0), (200.0, 0.1), (150.0, 0.3),
+    ]
+
+    def _multi_start_fit(
+        a_s: np.ndarray, ci_s: np.ndarray
+    ) -> tuple[float, float, float] | None:
+        """Return (vcmax, g_m, rmse) for the best-RMSE non-boundary
+        multi-start candidate, or None if all fail."""
+        residual_fn = _residual_builder(a_s, ci_s)
+        best: tuple[float, float, float] | None = None
         for vcmax_init, gm_init in init_grid:
             try:
                 result = least_squares(
-                    _residual,
+                    residual_fn,
                     x0=np.array([vcmax_init, gm_init]),
                     bounds=([1.0, 1e-4], [500.0, gm_upper_bound]),
                     method="trf",
@@ -396,22 +402,30 @@ def fit_ethier_livingston(
                 continue
             if not result.success:
                 continue
-            _vcmax_candidate, g_m_candidate = result.x
-            # Reject boundary hits (within 0.1% of the bound) — they
-            # signal the optimizer couldn't pin g_m, not a real
-            # extremum.
+            vcmax_candidate, g_m_candidate = result.x
             if g_m_candidate <= 1e-4 * 1.01:
                 continue
             if g_m_candidate >= gm_upper_bound * 0.99:
                 continue
             residual_norm = float(np.sqrt(np.mean(result.fun ** 2)))
-            if residual_norm < best_rmse:
-                best_rmse = residual_norm
-                best_g_m = float(g_m_candidate)
-        return best_g_m
+            if best is None or residual_norm < best[2]:
+                best = (
+                    float(vcmax_candidate),
+                    float(g_m_candidate),
+                    residual_norm,
+                )
+        return best
 
-    g_m_fit = _pointwise(a_r, ci_r, None)
-    if g_m_fit is None:
+    # Bootstrap wrapper: same multi-start machinery but only returns
+    # the g_m scalar, since _bootstrap_ci expects a float-yielding fn.
+    def _gm_only(
+        a_s: np.ndarray, ci_s: np.ndarray, _: np.ndarray | None
+    ) -> float | None:
+        res = _multi_start_fit(a_s, ci_s)
+        return None if res is None else res[1]
+
+    best_fit = _multi_start_fit(a_r, ci_r)
+    if best_fit is None:
         return GmMethodResult(
             method="ethier_livingston",
             g_m=None,
@@ -424,33 +438,22 @@ def fit_ethier_livingston(
             n_points_used=a_r.size,
             notes=["non-linear fit failed to converge on the Rubisco-limited points"],
         )
-
-    def _residual_full(params: np.ndarray) -> np.ndarray:
-        vcmax, g_m = params
-        pred = _predicted_a_net(
-            ci_r, vcmax=vcmax, j=1e6, rd=rd, g_m=g_m,
-            tleaf_c=tleaf_c, o2_mmol_mol=o2_mmol_mol, constants=constants,
-        )
-        return (pred - a_r).astype(np.float64)  # type: ignore[no-any-return]
-
-    final = least_squares(
-        _residual_full,
-        x0=np.array([60.0, max(g_m_fit, 1e-3)]),
-        bounds=([1.0, 1e-4], [500.0, 10.0]),
-        method="trf",
-    )
-    vcmax_fit, _ = final.x
-    residuals = final.fun
-    rmse = float(np.sqrt(np.mean(residuals * residuals))) if residuals.size else None
+    vcmax_fit, g_m_fit, rmse = best_fit
+    # Report the WINNING multi-start (Vcmax, g_m, RMSE) as the
+    # final tuple — round-2 review caught that the earlier code
+    # re-ran least_squares from a fresh x0 after the multi-start and
+    # reported that second fit's Vcmax/RMSE while keeping the
+    # multi-start's g_m, producing an internally inconsistent
+    # result.  Carry the full winning parameter vector through.
 
     rng = np.random.default_rng(42)
-    ci_low, ci_high = _bootstrap_ci(_pointwise, a_r, ci_r, None, bootstrap_iters, rng)
+    ci_low, ci_high = _bootstrap_ci(_gm_only, a_r, ci_r, None, bootstrap_iters, rng)
     return GmMethodResult(
         method="ethier_livingston",
         g_m=g_m_fit,
         g_m_ci_low=ci_low,
         g_m_ci_high=ci_high,
-        vcmax=float(vcmax_fit),
+        vcmax=vcmax_fit,
         j_max=None,
         rd=rd,
         rmse=rmse,

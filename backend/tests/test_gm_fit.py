@@ -221,6 +221,73 @@ def test_fit_all_with_noisy_data_still_recovers_gm_within_50_percent() -> None:
     assert result.g_m == pytest.approx(g_m_true, rel=0.5)
 
 
+def test_predicted_a_net_returns_fresh_iterate_at_convergence() -> None:
+    """Targeted regression for the round-1 stale-iterate bug.
+
+    `_predicted_a_net` solves A = min(Ac, Aj) - Rd with Cc = Ci - A/g_m
+    via fixed-point iteration.  The previous version returned the
+    PREVIOUS iterate (off-by-one step) once convergence was detected.
+    Reproduce the true converged A via a tight manual fixed-point loop
+    (100 iters, rtol=1e-10) and assert the predictor matches to <0.001
+    µmol/m²/s.  Covers both convergence path and bounded-iterations
+    exit path by using a mid-Ci point where convergence is fast and a
+    low-Ci point where it can take more iters.
+    """
+    from app.pipeline.farquhar import DEFAULT_CONSTANTS, kinetics_at
+    from app.pipeline.gm_fit import _predicted_a_net
+
+    ci = np.array([80.0, 400.0, 800.0])
+    vcmax, j, rd, g_m = 80.0, 160.0, 1.5, 0.3
+    pred = _predicted_a_net(ci, vcmax, j, rd, g_m, 25.0, 210.0, DEFAULT_CONSTANTS)
+
+    # Reference solution via direct iteration with much tighter
+    # tolerance + more iters.
+    kin = kinetics_at(25.0)
+    kc = kin["Kc_umol_mol"]
+    ko = kin["Ko_mmol_mol"]
+    gs = kin["Gamma_star_umol_mol"]
+    cc = ci.copy().astype(np.float64)
+    a_ref = np.zeros_like(cc)
+    for _ in range(500):
+        ac = vcmax * (cc - gs) / (cc + kc * (1 + 210.0 / ko))
+        aj = j * (cc - gs) / (4 * cc + 8 * gs)
+        a = np.minimum(ac, aj) - rd
+        cc_new = np.maximum(ci - a / g_m, gs * 0.5)
+        if np.allclose(cc_new, cc, rtol=1e-10):
+            a_ref = a
+            break
+        cc = cc_new
+        a_ref = a
+
+    np.testing.assert_allclose(pred, a_ref, atol=1e-3)
+
+
+def test_predicted_a_net_allows_cc_greater_than_ci_near_compensation() -> None:
+    """At Ci below the CO2 compensation point, A_net is negative
+    (respiration > photosynthesis) and Cc = Ci - A/g_m > Ci.  The
+    predictor must NOT clamp Cc to <= Ci, or the low-Ci branch that
+    Ethier and the joint fit read their g_m signal from becomes
+    distorted.  Round-1 review caught this bug.  Check that the
+    predictor produces A_net close to the analytical "below-compensation"
+    value which requires Cc > Ci.
+    """
+    from app.pipeline.farquhar import DEFAULT_CONSTANTS
+    from app.pipeline.gm_fit import _predicted_a_net
+
+    # At Ci=20 (well below Gamma*=42.75), any g_m allows A<0.  The
+    # Cc value is Ci - A/g_m > Ci (since A<0).  With old Cc<=Ci clamp,
+    # the predictor would have been pinned to Ci=20 and given a more
+    # negative A.  With the fix, Cc floats above 20 and A is closer to
+    # Rd alone (A ≈ -Rd when Ci is far below Gamma*).
+    ci = np.array([20.0])
+    pred = _predicted_a_net(ci, 80.0, 160.0, 1.5, 0.3, 25.0, 210.0, DEFAULT_CONSTANTS)
+    # Net A must be negative (below compensation) but NOT as negative
+    # as it would be with Cc clamped to Ci.  A close to the
+    # respiration floor (-Rd = -1.5) within a reasonable margin.
+    assert float(pred[0]) < 0
+    assert float(pred[0]) > -3.0  # not artificially amplified
+
+
 def test_result_round_trips_through_strict_json() -> None:
     import json
 
