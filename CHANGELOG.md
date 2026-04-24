@@ -6,7 +6,46 @@ hasn't tagged a release yet, so everything below is on `main`.
 
 ## [Unreleased]
 
-### PR #13b — Farquhar A-Cc フィット + g_m 推定 (current)
+### PR #14 — 文献照合 + 比較レポートエクスポート (current, ロードマップ最終)
+- `backend/app/pipeline/literature_ranges.py`: 主要形態・流体・CO2
+  パラメータの C3/C4/CAM 別の文献レンジを一元管理する静的カタログ
+  (Evans, Tosens, Flexas, Terashima, Wullschleger, Atkin, Poorter
+  の 20+ 行)。`LiteratureRange` dataclass + `find_range()` 解決
+  ロジック (photosynthesis_type 優先 → `any` プール fallback)。
+- `backend/app/pipeline/validation.py`: 測定値と文献レンジの照合
+  クラシファイア。`within / below / above / unknown` の 4 状態で
+  findings を返却。compare.METRICS を single source of truth として
+  使用し、NaN/Inf 測定値は graceful skip。`validate_gm_fit_result()`
+  は PR #13b の 3 手法を method 単位で照合。
+- `backend/app/api/validation.py`: 3 エンドポイント
+  - `GET /literature/ranges` — カタログ全体を公開
+  - `POST /images/{id}/validate` — 画像の全 analyses に対する照合
+  - `POST /gas-exchange/sessions/{id}/validate` — LI-COR セッションの
+    最新 gm_fit に対する照合
+- `backend/app/api/compare_export.py`: `POST /compare/export` で
+  Markdown / CSV レポート生成。per-metric Welch p + MW p + Hedges
+  g + CI + **グループ median の文献レンジ内外判定** を表に含める。
+  `text/markdown` or `text/csv` を直接返すので frontend は一発で
+  ダウンロード可能。
+- `ValidationBadge.tsx` を画像詳細ページ (image scope) と GmFitPanel
+  (session scope) に搭載。緑/琥珀/灰の 3 色で範囲内 / 逸脱 / 不明を
+  ピル表示、クリックで全 findings 展開。
+- `CompareDashboard` に "Markdown エクスポート" / "CSV エクスポート"
+  ボタン追加。
+- `/dashboard/literature` ページ — カタログ全体のテーブル (フィルター
+  付き)、出典付き。ヘッダーに「文献」nav リンク。
+- 21 pytest ケース: 範囲テーブルの monotonic min/max、within/below/
+  above クラシファイア、photosynthesis_type fallback (exact → any →
+  unknown)、NaN/Inf 耐性、gm_fit の method 単位 flatten、JSON 厳密
+  ラウンドトリップ、Markdown/CSV レンダラの構造 + 文献内外ラベル +
+  unknown-type fallback。
+- これで **PRs #8-14 の 7-PR ロードマップが完了**。画像アップロード
+  → 形態解析 (PR #10) → LI-COR ガス交換取り込み (PR #11) → Darcy
+  水流 PDE (PR #12) → CO2 拡散 PDE (PR #13a) → Farquhar g_m フィット
+  (PR #13b) → C3/C4 統計比較 + 文献照合 + publication-ready レポート
+  (PR #14) が一貫して動作。
+
+### PR #13b — Farquhar A-Cc フィット + g_m 推定
 - `backend/app/pipeline/farquhar.py`: FvCB (Farquhar-von Caemmerer-
   Berry) photosynthesis モデル core。Ac / Aj / Ap / Rd 計算、Arrhenius
   温度補正 (Bernacchi 2001 の Kc, Ko, Γ*, Vcmax, J, Rd 活性化エネルギー)。

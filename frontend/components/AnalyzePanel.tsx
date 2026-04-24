@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, BasicMeasurementResult } from "@/lib/supabase/types";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ThicknessChart } from "./ThicknessChart";
 
@@ -19,6 +20,7 @@ function isBasicResult(r: AnalysisRow["result"]): r is BasicMeasurementResult {
 
 export function AnalyzePanel({ imageId, initial, canRun }: Props) {
   const supabase = createClient();
+  const router = useRouter();
   const [referenceUm, setReferenceUm] = useState("100");
   const [analysis, setAnalysis] = useState<AnalysisRow | null>(initial ?? null);
   const [running, setRunning] = useState(false);
@@ -50,6 +52,9 @@ export function AnalyzePanel({ imageId, initial, canRun }: Props) {
       }
       const body = (await resp.json()) as AnalysisRow;
       setAnalysis(body);
+      // Server page re-fetches latest analyses so ValidationBadge's
+      // refreshKey bumps and re-validates against the new result.
+      if (body.status === "done") router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

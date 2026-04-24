@@ -1,5 +1,6 @@
 "use client";
 
+import { ValidationBadge } from "@/components/ValidationBadge";
 import { createClient } from "@/lib/supabase/client";
 import type {
   GasExchangePointRow,
@@ -146,10 +147,13 @@ export function GmFitPanel({ sessionId, points, canRun }: Props) {
 
       {fit && (
         <>
-          <p className="text-xs text-neutral-500">
-            Tleaf: {fmt(fit.tleaf_c, 1)} ℃ · 使用点数: {fit.input_point_count} · O₂:{" "}
-            {fmt(fit.o2_mmol_mol, 0)} mmol/mol
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-xs text-neutral-500">
+              Tleaf: {fmt(fit.tleaf_c, 1)} ℃ · 使用点数: {fit.input_point_count} · O₂:{" "}
+              {fmt(fit.o2_mmol_mol, 0)} mmol/mol
+            </p>
+            <ValidationBadge target={{ kind: "session", sessionId }} refreshKey={latestFit?.id} />
+          </div>
           {fit.notes.length > 0 && (
             <ul className="list-disc space-y-1 pl-5 text-xs text-neutral-500">
               {fit.notes.map((n) => (

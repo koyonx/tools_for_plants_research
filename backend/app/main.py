@@ -8,12 +8,14 @@ from app.api import (
     co2_diffusion,
     co2_morphometrics,
     compare,
+    compare_export,
     darcy,
     gas_exchange,
     gm_fit,
     health,
     segformer,
     training,
+    validation,
     water_path,
 )
 from app.core.config import settings
@@ -45,8 +47,10 @@ def create_app() -> FastAPI:
     app.include_router(co2_diffusion.router, tags=["analyze"])
     app.include_router(batches.router, tags=["batches"])
     app.include_router(compare.router, tags=["compare"])
+    app.include_router(compare_export.router, tags=["compare"])
     app.include_router(gas_exchange.router, tags=["gas-exchange"])
     app.include_router(gm_fit.router, tags=["gas-exchange"])
+    app.include_router(validation.router, tags=["validation"])
     app.include_router(training.router, tags=["training"])
     return app
 
