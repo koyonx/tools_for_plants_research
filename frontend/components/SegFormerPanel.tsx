@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, SegFormerResult } from "@/lib/supabase/types";
 import { TISSUE_CLASS_BY_KEY } from "@/lib/tissue-classes";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
@@ -24,6 +25,7 @@ function isSegFormerResult(r: AnalysisRow["result"]): r is SegFormerResult {
 
 export function SegFormerPanel({ imageId, imageUrl, initial, umPerPx, canRun }: Props) {
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
   const [analysis, setAnalysis] = useState<AnalysisRow | null>(initial ?? null);
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +72,10 @@ export function SegFormerPanel({ imageId, imageUrl, initial, umPerPx, canRun }: 
         if (resp.ok) {
           const row = (await resp.json()) as AnalysisRow;
           setAnalysis(row);
-          if (row.status === "done" || row.status === "error") terminal = true;
+          if (row.status === "done" || row.status === "error") {
+            terminal = true;
+            if (row.status === "done") router.refresh();
+          }
         }
       } catch {
         // fall through to reschedule

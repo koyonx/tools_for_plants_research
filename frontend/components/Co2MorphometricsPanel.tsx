@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, Co2MorphometricsResult } from "@/lib/supabase/types";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
@@ -43,6 +44,7 @@ export function Co2MorphometricsPanel({
   imageHeight,
 }: Props) {
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
   const [analysis, setAnalysis] = useState<AnalysisRow | null>(initial ?? null);
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,7 +120,10 @@ export function Co2MorphometricsPanel({
         if (resp.ok) {
           const row = (await resp.json()) as AnalysisRow;
           setAnalysis(row);
-          if (row.status === "done" || row.status === "error") terminal = true;
+          if (row.status === "done" || row.status === "error") {
+            terminal = true;
+            if (row.status === "done") router.refresh();
+          }
         }
       } catch {
         // fall through to reschedule

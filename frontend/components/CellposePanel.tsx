@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, CellposeResult } from "@/lib/supabase/types";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
@@ -26,6 +27,7 @@ export function CellposePanel({ imageId, imageUrl, initial, umPerPx, canRun }: P
   // memoise here — otherwise every re-render gives us a new reference,
   // poisoning the poll-effect's dependency array.
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
   const [analysis, setAnalysis] = useState<AnalysisRow | null>(initial ?? null);
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +77,9 @@ export function CellposePanel({ imageId, imageUrl, initial, umPerPx, canRun }: P
           setAnalysis(row);
           if (row.status === "done" || row.status === "error") {
             terminal = true;
+            // Bump the server page so ValidationBadge picks up the
+            // new analysis id (and the literature report re-runs).
+            if (row.status === "done") router.refresh();
           }
         }
         // Non-ok responses fall through to re-scheduling below.

@@ -111,12 +111,12 @@ def validate_analyses(
     """Given a `{kind: result_blob}` map and the image's
     photosynthesis_type, return a flat list of findings.
 
-    We use compare.METRICS as the single source of truth for which
-    scalar fields exist in each result blob (so new metrics added
-    there automatically get validated when a literature range is
-    registered).  Parameters without a literature range at all are
-    skipped silently — the point is to validate what we can cite,
-    not to flood the UI with unknowns.
+    We use `pipeline.metric_catalog.METRICS` as the single source of
+    truth for which scalar fields exist in each result blob (so new
+    metrics added there automatically get validated when a literature
+    range is registered).  Parameters without a literature range at
+    all are skipped silently — the point is to validate what we can
+    cite, not to flood the UI with unknowns.
     """
     findings: list[ValidationFinding] = []
     for metric in METRICS:

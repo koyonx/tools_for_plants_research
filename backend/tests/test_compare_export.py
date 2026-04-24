@@ -206,26 +206,52 @@ def test_markdown_n_images_uses_group_size_not_metric_sample_count() -> None:
 def test_markdown_escapes_hostile_filter_values() -> None:
     """Group filter values come from free-text (plant_id, species,
     treatment).  Pipes/backticks/newlines must NOT break the table.
-    Round-1 review MINOR."""
+    Round-1 review MINOR.
+
+    Round-2 review NIT: the earlier version only asserted Group A's
+    row.  Extend to check structural integrity across every table
+    body row — filter rows AND per-metric rows — so a regression in
+    any cell's escaping is caught."""
     hostile = {
+        # Each free-text field includes a character that would split
+        # or terminate a Markdown table cell if unescaped.
         "plant_id": "has|pipes",
         "species": "multi\nline\r",
         "treatment": "back`ticks`",
     }
+    # Inject hostile text into metric label/unit too so body rows
+    # exercise the same escape path.
+    rows = _sample_rows()
+    rows[0]["metric"]["label"] = "bad|label"
+    rows[0]["metric"]["unit"] = "back`unit`"
     md = _render_markdown(
         group_a_filter=hostile,
         group_b_filter={"photosynthesis_type": "C4"},
-        metric_rows=_sample_rows(),
+        metric_rows=rows,
         group_a_image_count=5,
         group_b_image_count=9,
     )
-    a_line = next(ln for ln in md.splitlines() if ln.startswith("| A |"))
-    assert "\\|" in a_line, "pipe was not escaped"
-    assert "\\`" in a_line, "backtick was not escaped"
-    # Newlines folded.
-    assert "\n" not in a_line
-    # Table structure intact: escaped pipes (`\|`) remain in the raw
-    # string but don't break columns.  Check the number of *unescaped*
-    # pipes equals the expected 4 column delimiters.
-    unescaped_pipes = a_line.count("|") - a_line.count("\\|")
-    assert unescaped_pipes == 4
+    # No raw newline anywhere — hostile multi-line values must be folded.
+    assert "multi\nline" not in md
+    # Escape sentinels still show up somewhere in the document.
+    assert "\\|" in md and "\\`" in md
+
+    # Each body row ("| A | ... |", "| B | ... |", every metric row)
+    # has exactly the expected number of *unescaped* column delimiters.
+    def unescaped_pipes(line: str) -> int:
+        return line.count("|") - line.count("\\|")
+
+    group_rows = [ln for ln in md.splitlines() if ln.startswith(("| A |", "| B |"))]
+    assert len(group_rows) == 2
+    for ln in group_rows:
+        assert unescaped_pipes(ln) == 4, f"group row broken: {ln!r}"
+
+    # Per-metric table has 9 columns + 2 bracketing pipes = 10 delimiters.
+    metric_rows = [
+        ln for ln in md.splitlines()
+        if ln.startswith("| ") and ln.endswith(" |") and ln not in group_rows
+        and "---" not in ln and "Metric" not in ln and "Filter" not in ln
+    ]
+    assert len(metric_rows) >= 1, "expected at least one metric body row"
+    for ln in metric_rows:
+        assert unescaped_pipes(ln) == 10, f"metric row broken: {ln!r}"
