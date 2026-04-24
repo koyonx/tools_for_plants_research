@@ -139,6 +139,42 @@ export type DarcyResult = {
   notes: string[];
 };
 
+// PR #14 — literature validation + export types
+export type ValidationStatus = "within" | "below" | "above" | "unknown";
+
+export type LiteratureRangeRow = {
+  parameter_key: string;
+  applies_to: string;
+  min: number;
+  typical: number;
+  max: number;
+  unit: string;
+  source: string;
+  note: string;
+};
+
+export type ValidationFinding = {
+  parameter_key: string;
+  measured: number | null;
+  status: ValidationStatus;
+  range_min: number | null;
+  range_typical: number | null;
+  range_max: number | null;
+  unit: string;
+  source: string;
+  applies_to: string;
+  note: string;
+  analysis_kind: string;
+};
+
+export type ValidationReport = {
+  photosynthesis_type: string | null;
+  n_within: number;
+  n_outside: number;
+  n_unknown: number;
+  findings: ValidationFinding[];
+};
+
 // PR #13b — g_m (mesophyll conductance) Farquhar fits from LI-COR data
 export type GmFitMethod = "harley_variable_j" | "ethier_livingston" | "nonlinear_slope";
 

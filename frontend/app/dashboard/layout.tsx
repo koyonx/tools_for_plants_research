@@ -39,6 +39,12 @@ export default async function DashboardLayout({
             >
               ガス交換
             </Link>
+            <Link
+              href="/dashboard/literature"
+              className="text-neutral-600 hover:underline dark:text-neutral-300"
+            >
+              文献
+            </Link>
             <span className="text-neutral-500">{user.email}</span>
             <form action="/auth/signout" method="post">
               <button

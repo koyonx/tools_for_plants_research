@@ -6,6 +6,7 @@ import { DarcyPanel } from "@/components/DarcyPanel";
 import { ImageMetadataEditor } from "@/components/ImageMetadataEditor";
 import { ImageViewer } from "@/components/ImageViewer";
 import { SegFormerPanel } from "@/components/SegFormerPanel";
+import { ValidationBadge } from "@/components/ValidationBadge";
 import { WaterPathPanel } from "@/components/WaterPathPanel";
 import { toPublicSupabaseUrl } from "@/lib/supabase/public-url";
 import { createClient } from "@/lib/supabase/server";
@@ -164,12 +165,15 @@ export default async function ImageDetailPage({
             <dd>{new Date(image.created_at).toLocaleString("ja-JP")}</dd>
           </dl>
         </div>
-        <Link
-          href={`/dashboard/images/${image.id}/annotate`}
-          className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
-        >
-          アノテーション
-        </Link>
+        <div className="flex flex-col items-end gap-2">
+          <Link
+            href={`/dashboard/images/${image.id}/annotate`}
+            className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
+          >
+            アノテーション
+          </Link>
+          <ValidationBadge target={{ kind: "image", imageId: image.id }} />
+        </div>
       </div>
 
       {signed?.signedUrl ? (

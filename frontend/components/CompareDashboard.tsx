@@ -133,6 +133,45 @@ export function CompareDashboard({ images }: { images: MinImage[] }) {
     }
   };
 
+  const exportReport = async (format: "markdown" | "csv") => {
+    setError(null);
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      if (!sess.session) throw new Error("セッションが切れました");
+      const resp = await fetch(`${BACKEND_URL}/compare/export`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sess.session.access_token}`,
+        },
+        body: JSON.stringify({
+          group_a: filterToBody(groupA),
+          group_b: filterToBody(groupB),
+          metrics: Array.from(selectedMetrics),
+          format,
+        }),
+      });
+      if (!resp.ok) {
+        const detail = await resp.text().catch(() => "");
+        throw new Error(`${resp.status}: ${detail.slice(0, 240)}`);
+      }
+      const text = await resp.text();
+      const extension = format === "markdown" ? "md" : "csv";
+      const mime = format === "markdown" ? "text/markdown" : "text/csv";
+      const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `compare-report.${extension}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <div className="space-y-4 text-sm">
       <p className="text-xs text-neutral-500">
@@ -186,7 +225,7 @@ export function CompareDashboard({ images }: { images: MinImage[] }) {
         </div>
       </section>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={run}
@@ -194,6 +233,22 @@ export function CompareDashboard({ images }: { images: MinImage[] }) {
           className="rounded bg-neutral-900 px-3 py-1.5 font-medium text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
         >
           {loading ? "計算中…" : "比較を実行"}
+        </button>
+        <button
+          type="button"
+          onClick={() => void exportReport("markdown")}
+          disabled={!canRun || loading}
+          className="rounded border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
+        >
+          Markdown エクスポート
+        </button>
+        <button
+          type="button"
+          onClick={() => void exportReport("csv")}
+          disabled={!canRun || loading}
+          className="rounded border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
+        >
+          CSV エクスポート
         </button>
         <span className="text-xs text-neutral-500">{selectedMetrics.size} 指標選択中</span>
       </div>
