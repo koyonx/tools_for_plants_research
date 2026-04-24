@@ -139,6 +139,42 @@ export type DarcyResult = {
   notes: string[];
 };
 
+// PR #13b — g_m (mesophyll conductance) Farquhar fits from LI-COR data
+export type GmFitMethod = "harley_variable_j" | "ethier_livingston" | "nonlinear_slope";
+
+export type GmMethodResult = {
+  method: GmFitMethod;
+  g_m: number | null; // umol m^-2 s^-1 (umol/mol)^-1
+  g_m_ci_low: number | null;
+  g_m_ci_high: number | null;
+  vcmax: number | null; // umol m^-2 s^-1
+  j_max: number | null; // umol m^-2 s^-1
+  rd: number | null; // umol m^-2 s^-1
+  rmse: number | null; // umol m^-2 s^-1
+  n_points_used: number;
+  notes: string[];
+};
+
+export type GmFitResult = {
+  tleaf_c: number;
+  o2_mmol_mol: number;
+  methods: GmMethodResult[];
+  input_point_count: number;
+  notes: string[];
+};
+
+export type GmFitRow = {
+  id: string;
+  session_id: string;
+  owner_id: string;
+  tleaf_c: number;
+  rd_pa: number | null;
+  o2_mmol_mol: number;
+  result: GmFitResult;
+  notes: string | null;
+  created_at: string;
+};
+
 // PR #11 — LI-COR gas-exchange ingestion
 export type GasExchangeInstrument = "li_6400" | "li_6800" | "generic_csv" | "unknown";
 

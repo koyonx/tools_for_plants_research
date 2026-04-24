@@ -10,6 +10,7 @@ from app.api import (
     compare,
     darcy,
     gas_exchange,
+    gm_fit,
     health,
     segformer,
     training,
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(batches.router, tags=["batches"])
     app.include_router(compare.router, tags=["compare"])
     app.include_router(gas_exchange.router, tags=["gas-exchange"])
+    app.include_router(gm_fit.router, tags=["gas-exchange"])
     app.include_router(training.router, tags=["training"])
     return app
 

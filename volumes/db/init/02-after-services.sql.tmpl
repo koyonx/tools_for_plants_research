@@ -451,3 +451,52 @@ CREATE TRIGGER gas_exchange_points_recount_trg
   AFTER INSERT OR DELETE OR UPDATE OF session_id
   ON public.gas_exchange_points
   FOR EACH ROW EXECUTE FUNCTION public.gas_exchange_points_recount();
+
+-- ===========================================================================
+-- gm_fits (PR #13b) — Farquhar + g_m fit results per gas-exchange session.
+--
+-- A session can be fit multiple times with different method choices,
+-- Rd assumptions, or temperatures; keep every fit and let the UI pick
+-- the latest or compare them.  Composite FK mirrors the points table
+-- to keep ownership integrity at the DB level.
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS public.gm_fits (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id      uuid NOT NULL,
+  owner_id        uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  tleaf_c         double precision NOT NULL DEFAULT 25.0,
+  rd_pa           double precision,
+  o2_mmol_mol     double precision NOT NULL DEFAULT 210.0,
+  -- Per-method result blob — list[GmMethodResult].  Kept denormalised
+  -- to avoid another join for the common "show me all three methods"
+  -- query the UI runs.
+  result          jsonb NOT NULL DEFAULT '{}'::jsonb,
+  notes           text,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.gm_fits
+  DROP CONSTRAINT IF EXISTS gm_fits_session_owner_fk;
+ALTER TABLE public.gm_fits
+  ADD CONSTRAINT gm_fits_session_owner_fk
+    FOREIGN KEY (session_id, owner_id)
+    REFERENCES public.gas_exchange_sessions(id, owner_id)
+    ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS gm_fits_session_idx ON public.gm_fits(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS gm_fits_owner_idx ON public.gm_fits(owner_id);
+
+ALTER TABLE public.gm_fits ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "gm_fits owner read" ON public.gm_fits;
+CREATE POLICY "gm_fits owner read"
+  ON public.gm_fits FOR SELECT
+  TO authenticated
+  USING (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "gm_fits owner write" ON public.gm_fits;
+CREATE POLICY "gm_fits owner write"
+  ON public.gm_fits FOR ALL
+  TO authenticated
+  USING (owner_id = auth.uid())
+  WITH CHECK (owner_id = auth.uid());

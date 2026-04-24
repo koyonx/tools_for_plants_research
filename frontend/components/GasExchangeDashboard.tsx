@@ -1,5 +1,6 @@
 "use client";
 
+import { GmFitPanel } from "@/components/GmFitPanel";
 import { createClient } from "@/lib/supabase/client";
 import type {
   GasExchangePointRow,
@@ -460,6 +461,7 @@ function SessionDetail({
       {!busy && points && points.length > 0 && (
         <>
           <ACiScatter points={points} />
+          <GmFitPanel sessionId={session.id} points={points} canRun={true} />
           <PointsTable points={points.slice(0, 50)} />
           {points.length > 50 && (
             <p className="text-xs text-neutral-500">
