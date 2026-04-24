@@ -187,16 +187,33 @@ def fit_harley_variable_j(
     def _pointwise(a_s: np.ndarray, ci_s: np.ndarray, etr_s: np.ndarray | None) -> float | None:
         if etr_s is None:
             return None
-        denom_ratio = etr_s - 4.0 * (a_s + rd)
+        # Harley's analytical g_m formula is only valid on RuBP-regen-
+        # limited (Aj-limited) points — the derivation assumes A = Aj.
+        # `J - 4(A+Rd) > 0` is NECESSARY (denominator positivity) but
+        # NOT SUFFICIENT — Rubisco-limited and transition points can
+        # pass the denominator check with meaningless g_m values that
+        # bias the median when included.  Round-1 review caught this;
+        # restrict to high-Ci points (Ci > 300 umol/mol) which is the
+        # conventional RuBP-regen regime cutoff in the literature
+        # (Harley 1992; Flexas et al 2007).  Operators can supply
+        # pre-filtered inputs if they know their transition is
+        # somewhere else (e.g. low light → lower transition).
+        rubisco_regen_mask = ci_s > 300.0
+        if rubisco_regen_mask.sum() < MIN_POINTS_PER_METHOD:
+            return None
+        a_hi = a_s[rubisco_regen_mask]
+        ci_hi = ci_s[rubisco_regen_mask]
+        etr_hi = etr_s[rubisco_regen_mask]
+        denom_ratio = etr_hi - 4.0 * (a_hi + rd)
         valid = np.isfinite(denom_ratio) & (denom_ratio > 1e-9)
         if not valid.any():
             return None
-        ci_minus_cc = gs * (etr_s[valid] + 8.0 * (a_s[valid] + rd)) / denom_ratio[valid]
-        denom = ci_s[valid] - ci_minus_cc
+        ci_minus_cc = gs * (etr_hi[valid] + 8.0 * (a_hi[valid] + rd)) / denom_ratio[valid]
+        denom = ci_hi[valid] - ci_minus_cc
         ok = np.isfinite(denom) & (np.abs(denom) > 1e-6)
         if not ok.any():
             return None
-        gm_values = a_s[valid][ok] / denom[ok]
+        gm_values = a_hi[valid][ok] / denom[ok]
         gm_values = gm_values[np.isfinite(gm_values) & (gm_values > 0)]
         if gm_values.size == 0:
             return None
@@ -215,9 +232,10 @@ def fit_harley_variable_j(
             rmse=None,
             n_points_used=a_f.size,
             notes=[
-                "no usable points with positive denominator "
-                "(J - 4*(A+Rd) > 0); curve may not include enough "
-                "RuBP-regen-limited points"
+                "no usable RuBP-regen-limited points (Ci > 300 "
+                "umol/mol with positive denominator J - 4*(A+Rd)); "
+                "curve may be all Rubisco-limited, too short, or "
+                "J too small relative to A"
             ],
         )
 
@@ -251,27 +269,48 @@ def _predicted_a_net(
     constants: FarquharConstants,
 ) -> np.ndarray:
     """Predict A_net for each Ci by iterating A = Farquhar(Cc) with
-    Cc = Ci - A / g_m.  Solve the implicit relation with fixed-point
-    iteration — convergent in 4-5 steps for typical g_m values;
-    fast enough to be called from least_squares."""
+    Cc = Ci - A / g_m.
+
+    Round-1 review fixed two subtle bugs that also slipped past the
+    synthetic parameter-recovery tests (the test generator replicated
+    the same bugs, so they were self-validating):
+
+    1. The previous version returned the PREVIOUS iterate (`a_net_prev`)
+       after convergence, not the freshly-computed `a_net` — off by one
+       fixed-point step, which shows up as ~0.1-0.5 umol/m^2/s drift at
+       mid-Ci where the iteration hasn't fully settled.
+    2. `cc_new` was clipped to `<= Ci`.  That's physically wrong near
+       the CO2 compensation point: when A_net < 0 (respiration exceeds
+       photosynthesis), Cc = Ci - A/g_m > Ci.  Clamping Cc to Ci
+       distorts the low-Ci branch that Ethier and the joint fit read
+       their g_m signal from.
+
+    Lower bound stays at `gs * 0.5` to keep the solver away from
+    singular points where Cc < Gamma* drives A_c strongly negative.
+    """
     kin = kinetics_at(tleaf_c, constants)
     kc = kin["Kc_umol_mol"]
     ko = kin["Ko_mmol_mol"]
     gs = kin["Gamma_star_umol_mol"]
     cc = ci.copy().astype(np.float64)
     a_net_prev = np.zeros_like(cc)
-    for _ in range(20):
+    a_net = a_net_prev
+    for _ in range(50):
         ac = a_carbox(cc, vcmax=vcmax, kc=kc, ko=ko, gamma_star=gs, o2_mmol_mol=o2_mmol_mol)
         aj = a_regen(cc, j=j, gamma_star=gs)
         a_net = np.minimum(ac, aj) - rd
         a_net = np.where(np.isfinite(a_net), a_net, 0.0)
-        cc_new = ci - a_net / g_m
-        cc_new = np.clip(cc_new, gs * 0.5, ci)
-        if np.allclose(a_net, a_net_prev, rtol=1e-5, atol=1e-4):
-            break
+        # Cc = Ci - A/g_m.  A can be negative (below compensation) →
+        # Cc > Ci is physically correct; only clamp the LOWER bound
+        # to keep Cc away from A_c's pole near Gamma*.
+        cc_new = np.maximum(ci - a_net / g_m, gs * 0.5)
+        if np.allclose(a_net, a_net_prev, rtol=1e-6, atol=1e-5):
+            # Return the FRESHLY computed a_net at the converged Cc,
+            # not the prior iterate.  Round-1 review bug.
+            return a_net
         a_net_prev = a_net
         cc = cc_new
-    return a_net_prev
+    return a_net
 
 
 def fit_ethier_livingston(
@@ -330,20 +369,46 @@ def fit_ethier_livingston(
             )
             return (pred - a_s).astype(np.float64)  # type: ignore[no-any-return]
 
-        try:
-            result = least_squares(
-                _residual,
-                x0=np.array([60.0, 0.2]),
-                bounds=([1.0, 1e-4], [500.0, 20.0]),
-                method="trf",
-                max_nfev=400,
-            )
-        except Exception:
-            return None
-        if not result.success:
-            return None
-        _, g_m_fit = result.x
-        return float(g_m_fit) if g_m_fit > 0 else None
+        # Multi-start: Ethier's Vcmax-g_m landscape has a degenerate
+        # ridge.  Try multiple (Vcmax, g_m) initial guesses spanning
+        # the physically-plausible range and keep the lowest-RMSE
+        # fit.  Boundary hits at the upper g_m bound are rejected —
+        # they mean the optimizer couldn't pin g_m (literature
+        # documents Ethier's poor identifiability without a Vcmax
+        # anchor).
+        gm_upper_bound = 10.0  # above any observed g_m in Ci-ppm units
+        best_g_m: float | None = None
+        best_rmse = float("inf")
+        init_grid = [
+            (40.0, 0.05), (60.0, 0.2), (80.0, 0.5),
+            (120.0, 1.0), (200.0, 0.1), (150.0, 0.3),
+        ]
+        for vcmax_init, gm_init in init_grid:
+            try:
+                result = least_squares(
+                    _residual,
+                    x0=np.array([vcmax_init, gm_init]),
+                    bounds=([1.0, 1e-4], [500.0, gm_upper_bound]),
+                    method="trf",
+                    max_nfev=600,
+                )
+            except Exception:
+                continue
+            if not result.success:
+                continue
+            _vcmax_candidate, g_m_candidate = result.x
+            # Reject boundary hits (within 0.1% of the bound) — they
+            # signal the optimizer couldn't pin g_m, not a real
+            # extremum.
+            if g_m_candidate <= 1e-4 * 1.01:
+                continue
+            if g_m_candidate >= gm_upper_bound * 0.99:
+                continue
+            residual_norm = float(np.sqrt(np.mean(result.fun ** 2)))
+            if residual_norm < best_rmse:
+                best_rmse = residual_norm
+                best_g_m = float(g_m_candidate)
+        return best_g_m
 
     g_m_fit = _pointwise(a_r, ci_r, None)
     if g_m_fit is None:
@@ -371,7 +436,7 @@ def fit_ethier_livingston(
     final = least_squares(
         _residual_full,
         x0=np.array([60.0, max(g_m_fit, 1e-3)]),
-        bounds=([1.0, 1e-4], [500.0, 20.0]),
+        bounds=([1.0, 1e-4], [500.0, 10.0]),
         method="trf",
     )
     vcmax_fit, _ = final.x

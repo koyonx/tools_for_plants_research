@@ -122,11 +122,16 @@ async def run_gm_fit(
         # is present and finite.
         raw_block = pt.get("raw") or {}
         etr_candidate = None
-        for key in ("ETR", "J", "Etr", "etr"):
-            v = raw_block.get(key) if isinstance(raw_block, dict) else None
-            if isinstance(v, int | float):
-                etr_candidate = float(v)
-                break
+        # LI-COR exports use a variety of casings for the electron-
+        # transport-rate column: LI-6400 writes "ETR", LI-6800 writes
+        # "J" (on newer firmware) or "ETR"; operator-edited CSVs
+        # sometimes lowercase either.  Check all seen variants.
+        if isinstance(raw_block, dict):
+            for key in ("ETR", "J", "Etr", "etr", "j"):
+                v = raw_block.get(key)
+                if isinstance(v, int | float):
+                    etr_candidate = float(v)
+                    break
         if etr_candidate is not None and np.isfinite(etr_candidate) and etr_candidate > 0:
             etr_vals.append(etr_candidate)
             etr_present += 1
