@@ -24,8 +24,8 @@ import math
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from app.api.compare import METRICS
 from app.pipeline.literature_ranges import LiteratureRange, find_range
+from app.pipeline.metric_catalog import METRICS
 
 
 @dataclass(frozen=True)

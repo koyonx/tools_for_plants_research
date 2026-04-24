@@ -45,8 +45,9 @@ def test_find_range_prefers_exact_photosynthesis_type() -> None:
 
 
 def test_find_range_falls_back_to_any_pool() -> None:
-    # co2_cc_mean_pa has only an "any"-scope row in the table.
-    r = find_range("co2_cc_mean_pa", "C3")
+    # darcy_k_leaf is curated as `applies_to="any"` (no C3/C4 split),
+    # so asking for C3 should fall through to the pooled row.
+    r = find_range("darcy_k_leaf", "C3")
     assert r is not None
     assert r.applies_to == "any"
 
@@ -113,8 +114,8 @@ def test_validate_analyses_handles_missing_photosynthesis_type() -> None:
         "co2_morphometrics": {
             "s_mes_s": 15.0,  # only C3 + C4 rows; no "any"
         },
-        "co2_diffusion": {
-            "cc_mean_pa": 18.0,  # has an "any" row
+        "darcy_flow": {
+            "k_leaf": 1.0e-12,  # darcy_k_leaf has an "any" row
         },
     }
     report = validate_analyses(blobs, photosynthesis_type=None)
@@ -122,7 +123,7 @@ def test_validate_analyses_handles_missing_photosynthesis_type() -> None:
     # Unknown because no pooled range exists for s_mes_s.
     assert by_key["co2_s_mes_s"].status == "unknown"
     # Hits the "any" range.
-    assert by_key["co2_cc_mean_pa"].status == "within"
+    assert by_key["darcy_k_leaf"].status == "within"
 
 
 def test_validate_analyses_rejects_nan_inf_measured_values() -> None:

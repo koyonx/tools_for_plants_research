@@ -172,7 +172,20 @@ export default async function ImageDetailPage({
           >
             アノテーション
           </Link>
-          <ValidationBadge target={{ kind: "image", imageId: image.id }} />
+          <ValidationBadge
+            target={{ kind: "image", imageId: image.id }}
+            refreshKey={[
+              latestAnalysis?.id,
+              latestCellpose?.id,
+              latestSegformer?.id,
+              latestWaterPath?.id,
+              latestCo2Morph?.id,
+              latestDarcy?.id,
+              latestCo2Diffusion?.id,
+            ]
+              .filter(Boolean)
+              .join("::")}
+          />
         </div>
       </div>
 

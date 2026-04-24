@@ -13,10 +13,10 @@ of several conventions.  We store ranges in the units the pipelines
 emit (see each field's `unit` string) and document the conversion
 factor when it's non-trivial — specifically:
 
-- Our `g_m_proxy` (PR #13a) is mol m^-2 s^-1 Pa^-1 (SI).
+- Our `g_m_proxy` (PR #13a) is mol m⁻² s⁻¹ Pa⁻¹ (SI).
 - Our fitted `g_m` from Farquhar (PR #13b) is
-  umol m^-2 s^-1 (umol/mol)^-1, which at 1 atm ~= 1 bar equals
-  numerically the same as mol m^-2 s^-1 bar^-1 that Flexas 2008
+  mol m⁻² s⁻¹ (µmol/mol)⁻¹, which at 1 atm ~= 1 bar equals
+  numerically the same as mol m⁻² s⁻¹ bar⁻¹ that Flexas 2008
   uses.  A value of 0.3 in our internal units is directly
   comparable to 0.3 in Flexas's tables.
 
@@ -115,7 +115,7 @@ LITERATURE_RANGES: tuple[LiteratureRange, ...] = (
         parameter_key="co2_t_cw_median_um",
         applies_to="C3",
         min=0.1, typical=0.2, max=0.5,
-        unit="um",
+        unit="µm",
         source="Evans et al. 2009 (Plant Cell Environ)",
         note="TEM-measured cell-wall thickness; our DT proxy is "
              "measured on light-microscopy polygons and skews larger",
@@ -124,21 +124,21 @@ LITERATURE_RANGES: tuple[LiteratureRange, ...] = (
         parameter_key="co2_t_cw_median_um",
         applies_to="C4",
         min=0.15, typical=0.3, max=0.6,
-        unit="um",
+        unit="µm",
         source="Evans et al. 2009",
     ),
     LiteratureRange(
         parameter_key="co2_mesophyll_thickness_median_um",
         applies_to="C3",
         min=80.0, typical=150.0, max=250.0,
-        unit="um",
+        unit="µm",
         source="Terashima et al. 2011",
     ),
     LiteratureRange(
         parameter_key="co2_mesophyll_thickness_median_um",
         applies_to="C4",
         min=40.0, typical=80.0, max=130.0,
-        unit="um",
+        unit="µm",
         source="Dengler & Nelson 1999",
     ),
     # --- Darcy hydraulic conductance (PR #12) ---
@@ -146,7 +146,7 @@ LITERATURE_RANGES: tuple[LiteratureRange, ...] = (
         parameter_key="darcy_k_leaf",
         applies_to="any",
         min=1.0e-14, typical=1.0e-12, max=1.0e-10,
-        unit="kg/(s*Pa*m)",
+        unit="kg/(s·Pa·m)",
         source="model-internal (PR #12 synthetic ranges)",
         note="K_leaf from our 2-D FV solver; absolute value depends "
              "on permeability overrides.  Ratios between groups are "
@@ -157,7 +157,7 @@ LITERATURE_RANGES: tuple[LiteratureRange, ...] = (
         parameter_key="co2_g_m_proxy",
         applies_to="C3",
         min=0.05, typical=0.25, max=0.6,
-        unit="mol/(m^2*s*Pa)",
+        unit="mol/(m²·s·Pa)",
         source="Flexas et al. 2008 (Plant Cell Environ) — review",
         note="PR #13a's geometry-only proxy; expect systematic offset "
              "from Flexas in-vivo values",
@@ -166,24 +166,46 @@ LITERATURE_RANGES: tuple[LiteratureRange, ...] = (
         parameter_key="co2_g_m_proxy",
         applies_to="C4",
         min=0.03, typical=0.15, max=0.4,
-        unit="mol/(m^2*s*Pa)",
+        unit="mol/(m²·s·Pa)",
         source="Flexas et al. 2008",
+    ),
+    # Cc and drawdown differ substantially between C3 and C4 (C4's
+    # CCM keeps bundle-sheath Cc >> Ci), so pooling them into an
+    # `any` range would mask physiologically meaningful between-type
+    # differences — review caught this.  Encode per-type bands.
+    LiteratureRange(
+        parameter_key="co2_cc_mean_pa",
+        applies_to="C3",
+        min=5.0, typical=18.0, max=25.0,
+        unit="Pa",
+        source="Flexas et al. 2008",
+        note="Chloroplastic CO2 at ambient Ci ~25 Pa, well-watered C3",
     ),
     LiteratureRange(
         parameter_key="co2_cc_mean_pa",
-        applies_to="any",
-        min=5.0, typical=18.0, max=30.0,
+        applies_to="C4",
+        min=20.0, typical=60.0, max=150.0,
         unit="Pa",
-        source="Flexas et al. 2008",
-        note="Chloroplastic CO2 at ambient Ci ~25 Pa, well-watered",
+        source="von Caemmerer 2000; Ghannoum 2009",
+        note="C4 bundle-sheath Cc is concentrated via CCM — "
+             "typically 3-10x higher than Ci",
     ),
     LiteratureRange(
         parameter_key="co2_drawdown_mean_pa",
-        applies_to="any",
-        min=2.0, typical=8.0, max=20.0,
+        applies_to="C3",
+        min=2.0, typical=8.0, max=15.0,
         unit="Pa",
         source="Flexas et al. 2008",
-        note="Ci - Cc drawdown in typical C3/C4",
+        note="Ci - Cc drawdown in typical C3 photosynthesis",
+    ),
+    LiteratureRange(
+        parameter_key="co2_drawdown_mean_pa",
+        applies_to="C4",
+        min=-130.0, typical=-30.0, max=5.0,
+        unit="Pa",
+        source="von Caemmerer 2000",
+        note="C4 'drawdown' can be negative (Cc > Ci via CCM); "
+             "operators should interpret sign accordingly",
     ),
     # --- Farquhar fit parameters (PR #13b) ---
     # Keys with `fit_params.` prefix match the validation output path
@@ -192,7 +214,7 @@ LITERATURE_RANGES: tuple[LiteratureRange, ...] = (
         parameter_key="gm_fit.g_m",
         applies_to="C3",
         min=0.05, typical=0.25, max=0.6,
-        unit="mol/(m^2*s)/(umol/mol)",
+        unit="mol/(m²·s)/(µmol/mol)",
         source="Flexas et al. 2008 — review; equivalent to "
                "mol/m^2/s/bar at 1 atm",
     ),
@@ -200,21 +222,21 @@ LITERATURE_RANGES: tuple[LiteratureRange, ...] = (
         parameter_key="gm_fit.g_m",
         applies_to="C4",
         min=0.03, typical=0.15, max=0.4,
-        unit="mol/(m^2*s)/(umol/mol)",
+        unit="mol/(m²·s)/(µmol/mol)",
         source="Flexas et al. 2008",
     ),
     LiteratureRange(
         parameter_key="gm_fit.vcmax",
         applies_to="C3",
         min=30.0, typical=80.0, max=200.0,
-        unit="umol/(m^2*s)",
+        unit="µmol/(m²·s)",
         source="Wullschleger 1993 (J Exp Bot) — 109-species review",
     ),
     LiteratureRange(
         parameter_key="gm_fit.vcmax",
         applies_to="C4",
         min=20.0, typical=50.0, max=100.0,
-        unit="umol/(m^2*s)",
+        unit="µmol/(m²·s)",
         source="Wullschleger 1993 — C4 subset is smaller due to PEP "
                "handling the primary carboxylation",
     ),
@@ -222,21 +244,21 @@ LITERATURE_RANGES: tuple[LiteratureRange, ...] = (
         parameter_key="gm_fit.j_max",
         applies_to="C3",
         min=60.0, typical=160.0, max=300.0,
-        unit="umol/(m^2*s)",
+        unit="µmol/(m²·s)",
         source="Wullschleger 1993",
     ),
     LiteratureRange(
         parameter_key="gm_fit.j_max",
         applies_to="C4",
         min=100.0, typical=220.0, max=400.0,
-        unit="umol/(m^2*s)",
+        unit="µmol/(m²·s)",
         source="Wullschleger 1993",
     ),
     LiteratureRange(
         parameter_key="gm_fit.rd",
         applies_to="any",
         min=0.2, typical=1.2, max=3.0,
-        unit="umol/(m^2*s)",
+        unit="µmol/(m²·s)",
         source="Atkin et al. 2005 (New Phytol)",
         note="Leaf dark respiration at 25 C, well-watered",
     ),
@@ -245,14 +267,14 @@ LITERATURE_RANGES: tuple[LiteratureRange, ...] = (
         parameter_key="leaf_mean_thickness_um",
         applies_to="C3",
         min=80.0, typical=180.0, max=350.0,
-        unit="um",
+        unit="µm",
         source="Poorter et al. 2009 (New Phytol) — meta-analysis",
     ),
     LiteratureRange(
         parameter_key="leaf_mean_thickness_um",
         applies_to="C4",
         min=50.0, typical=120.0, max=220.0,
-        unit="um",
+        unit="µm",
         source="Poorter et al. 2009",
     ),
 )

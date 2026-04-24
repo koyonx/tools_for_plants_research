@@ -98,6 +98,8 @@ def test_markdown_renders_with_headers_and_one_row_per_metric() -> None:
         group_a_filter={"photosynthesis_type": "C3"},
         group_b_filter={"photosynthesis_type": "C4"},
         metric_rows=_sample_rows(),
+        group_a_image_count=12,
+        group_b_image_count=9,
     )
     # Structural checks — just make sure the output looks like
     # Markdown with the expected sections + tables.
@@ -123,6 +125,8 @@ def test_markdown_marks_out_of_range_medians() -> None:
         group_a_filter={"photosynthesis_type": "C3"},
         group_b_filter={"photosynthesis_type": "C4"},
         metric_rows=rows,
+        group_a_image_count=12,
+        group_b_image_count=9,
     )
     row = next(ln for ln in md.splitlines() if ln.startswith("| S_mes/S "))
     assert "below" in row
@@ -172,7 +176,56 @@ def test_markdown_no_range_label_shown_for_unknown_types() -> None:
         group_a_filter={},  # no photosynthesis_type
         group_b_filter={"photosynthesis_type": "C4"},
         metric_rows=_sample_rows(),
+        group_a_image_count=7,
+        group_b_image_count=9,
     )
     # S_mes/S has only C3 + C4 rows (no "any"), so group A → no range
     row = next(ln for ln in md.splitlines() if ln.startswith("| S_mes/S "))
     assert "no range" in row
+
+
+def test_markdown_n_images_uses_group_size_not_metric_sample_count() -> None:
+    """Round-1 review BLOCKER: the header 'N images' must come from
+    the resolved cohort size, not the per-metric non-null sample
+    count.  Seed the first metric's n with a smaller value and
+    confirm the header still reports the true cohort size."""
+    rows = _sample_rows()
+    rows[0]["group_a"]["n"] = 7  # per-metric count < true cohort
+    md = _render_markdown(
+        group_a_filter={"photosynthesis_type": "C3"},
+        group_b_filter={"photosynthesis_type": "C4"},
+        metric_rows=rows,
+        group_a_image_count=12,
+        group_b_image_count=9,
+    )
+    a_line = next(ln for ln in md.splitlines() if ln.startswith("| A |"))
+    assert "12" in a_line
+    assert "| 7 |" not in a_line
+
+
+def test_markdown_escapes_hostile_filter_values() -> None:
+    """Group filter values come from free-text (plant_id, species,
+    treatment).  Pipes/backticks/newlines must NOT break the table.
+    Round-1 review MINOR."""
+    hostile = {
+        "plant_id": "has|pipes",
+        "species": "multi\nline\r",
+        "treatment": "back`ticks`",
+    }
+    md = _render_markdown(
+        group_a_filter=hostile,
+        group_b_filter={"photosynthesis_type": "C4"},
+        metric_rows=_sample_rows(),
+        group_a_image_count=5,
+        group_b_image_count=9,
+    )
+    a_line = next(ln for ln in md.splitlines() if ln.startswith("| A |"))
+    assert "\\|" in a_line, "pipe was not escaped"
+    assert "\\`" in a_line, "backtick was not escaped"
+    # Newlines folded.
+    assert "\n" not in a_line
+    # Table structure intact: escaped pipes (`\|`) remain in the raw
+    # string but don't break columns.  Check the number of *unescaped*
+    # pipes equals the expected 4 column delimiters.
+    unescaped_pipes = a_line.count("|") - a_line.count("\\|")
+    assert unescaped_pipes == 4

@@ -59,6 +59,39 @@ def _fmt(value: float | None, digits: int = 3) -> str:
     return f"{value:.{digits}f}"
 
 
+def _md_escape(text: str) -> str:
+    """Escape characters that would break a Markdown table cell.
+
+    Pipes split the column, backticks close the surrounding code
+    span, and newlines end the row.  `<` / `>` can be misparsed as
+    inline HTML by some renderers.  Keep the transformation minimal
+    — we want the text to remain readable, just not hostile to the
+    table layout.
+    """
+    return (
+        text.replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("`", "\\`")
+        .replace("\n", " ")
+        .replace("\r", " ")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _render_filter_cell(filter_dict: dict[str, Any]) -> str:
+    """Format the group filter as a readable-in-Markdown cell.
+
+    We iterate the items so the output is stable and doesn't depend
+    on dict __repr__ quirks.  Each key/value gets escaped via
+    `_md_escape`, and the whole cell stays inside backticks for
+    monospace rendering — so values still look like filter syntax."""
+    if not filter_dict:
+        return "`(no filter)`"
+    parts = [f"{_md_escape(str(k))}={_md_escape(str(v))}" for k, v in filter_dict.items()]
+    return "`" + ", ".join(parts) + "`"
+
+
 def _lit_note(metric: MetricDef, group_type: str | None, median: float | None) -> str:
     """Return a short validation flag for a group's median value:
     "within", "below (min=..)", "above (max=..)", or "no range".
@@ -79,6 +112,8 @@ def _render_markdown(
     group_a_filter: dict[str, Any],
     group_b_filter: dict[str, Any],
     metric_rows: list[dict[str, Any]],
+    group_a_image_count: int,
+    group_b_image_count: int,
 ) -> str:
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     ga_type = group_a_filter.get("photosynthesis_type")
@@ -92,12 +127,13 @@ def _render_markdown(
     parts.append("")
     parts.append("| Group | Filter | N images |")
     parts.append("|---|---|---|")
-    parts.append(
-        f"| A | `{group_a_filter}` | {metric_rows[0]['group_a']['n'] if metric_rows else '—'} |"
-    )
-    parts.append(
-        f"| B | `{group_b_filter}` | {metric_rows[0]['group_b']['n'] if metric_rows else '—'} |"
-    )
+    # Round-1 review caught that the previous code used
+    # metric_rows[0]['group_a']['n'], which is the non-null SAMPLE
+    # COUNT for the first selected metric — not the cohort size.
+    # That lied about the N in a publication-facing report.  Pass
+    # the resolved group sizes through so the header is honest.
+    parts.append(f"| A | {_render_filter_cell(group_a_filter)} | {group_a_image_count} |")
+    parts.append(f"| B | {_render_filter_cell(group_b_filter)} | {group_b_image_count} |")
     parts.append("")
     parts.append("## Per-metric comparison")
     parts.append("")
@@ -124,13 +160,13 @@ def _render_markdown(
             "| "
             + " | ".join(
                 [
-                    m["label"],
-                    m["unit"],
+                    _md_escape(str(m["label"])),
+                    _md_escape(str(m["unit"])),
                     _fmt(a.get("median")),
                     _fmt(b.get("median")),
                     _fmt(row["tests"].get("welch_p_value")),
                     _fmt(row["tests"].get("mann_whitney_p_value")),
-                    g_cell,
+                    _md_escape(g_cell),
                     _lit_note(
                         METRICS_BY_KEY[m["key"]],
                         ga_type,
@@ -302,7 +338,13 @@ async def export_compare(
     group_b_filter = payload.group_b.model_dump(exclude_none=True)
 
     if payload.format == "markdown":
-        body = _render_markdown(group_a_filter, group_b_filter, metric_rows)
+        body = _render_markdown(
+            group_a_filter,
+            group_b_filter,
+            metric_rows,
+            group_a_image_count=len(images_a),
+            group_b_image_count=len(images_b),
+        )
         return PlainTextResponse(
             content=body,
             media_type="text/markdown; charset=utf-8",
