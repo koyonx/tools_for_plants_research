@@ -225,6 +225,52 @@ class SupabaseAuthedClient:
             params={"id": f"eq.{session_id}"},
         )
 
+    # ---- gm_fits (PR #13b) ----------------------------------------------
+    async def insert_gm_fit(self, row: dict[str, Any]) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            "/rest/v1/gm_fits",
+            headers={"Prefer": "return=representation", "Content-Type": "application/json"},
+            json=row,
+        )
+        return cast(dict[str, Any], response.json()[0])
+
+    async def list_gm_fits_for_session(self, session_id: str) -> list[dict[str, Any]]:
+        response = await self._request(
+            "GET",
+            "/rest/v1/gm_fits",
+            params={
+                "session_id": f"eq.{session_id}",
+                "select": "*",
+                "order": "created_at.desc",
+            },
+        )
+        rows: list[dict[str, Any]] = response.json()
+        return rows
+
+    async def get_gm_fit(self, fit_id: str) -> dict[str, Any] | None:
+        response = await self._request(
+            "GET",
+            "/rest/v1/gm_fits",
+            params={"id": f"eq.{fit_id}", "select": "*"},
+        )
+        rows: list[dict[str, Any]] = response.json()
+        return rows[0] if rows else None
+
+    async def latest_gm_fit_for_session(self, session_id: str) -> dict[str, Any] | None:
+        response = await self._request(
+            "GET",
+            "/rest/v1/gm_fits",
+            params={
+                "session_id": f"eq.{session_id}",
+                "select": "*",
+                "order": "created_at.desc",
+                "limit": "1",
+            },
+        )
+        rows: list[dict[str, Any]] = response.json()
+        return rows[0] if rows else None
+
     async def list_images_filtered(
         self,
         filters: dict[str, str] | None = None,

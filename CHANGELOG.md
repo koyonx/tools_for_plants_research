@@ -6,7 +6,36 @@ hasn't tagged a release yet, so everything below is on `main`.
 
 ## [Unreleased]
 
-### PR #13a — CO2 反応拡散 PDE ソルバ (current)
+### PR #13b — Farquhar A-Cc フィット + g_m 推定 (current)
+- `backend/app/pipeline/farquhar.py`: FvCB (Farquhar-von Caemmerer-
+  Berry) photosynthesis モデル core。Ac / Aj / Ap / Rd 計算、Arrhenius
+  温度補正 (Bernacchi 2001 の Kc, Ko, Γ*, Vcmax, J, Rd 活性化エネルギー)。
+  predict_a() は各 Cc で limiting regime (carboxylation / rubp_regen
+  / tpu) をラベル付きで返す。pure numpy、scipy 不使用。
+- `backend/app/pipeline/gm_fit.py`: g_m 推定 3 手法
+  - **Harley variable-J** (analytical、ETR 必須)
+  - **Ethier-Livingston** (Rubisco 限定領域非線形フィット)
+  - **Nonlinear slope** (Vcmax/J/Rd/g_m 同時フィット、scipy.optimize)
+  全手法に bootstrap 95% CI。失敗時は notes 付きで g_m=None を返す
+  (UI が常に 3 行表示できる)。
+- `backend/app/api/gm_fit.py`: 3 エンドポイント (POST fit, GET list,
+  GET single)。session の points から A, Ci, ETR を抽出 (ETR は
+  raw JSON から)、Tleaf は LI-COR 値中央値でフォールバック。結果は
+  新 `gm_fits` テーブルに永続化。
+- DB マイグレーション `gm_fits` テーブル (session_id composite FK で
+  gas_exchange_sessions に紐付け、RLS owner-only)。
+- `GmFitPanel.tsx` をガス交換セッション詳細に搭載。Tleaf / Rd
+  オーバーライド入力、3 手法結果テーブル、**A-Cc plot with fitted
+  curves** (クライアント側で Bernacchi 定数再計算して描画)。
+- 23 pytest ケース: Arrhenius / kinetics 基礎、Ac/Aj/Ap の個別性、
+  TPU ceiling、Rd 引き算、Cc from Ci (Fick 則)、3 手法合成データ
+  パラメータ recovery (Vcmax/J/Rd/g_m)、ETR 欠損での Harley skip、
+  ノイズ耐性、bootstrap CI bracket、strict JSON。
+- これで PR #10 (CO2 morphometrics) + PR #11 (LI-COR) + PR #13a
+  (CO2 PDE) のピースが揃い、C3 vs C4 の物理的に正しい比較
+  (g_m, Vcmax, J_max, S_mes/S, f_ias) が /compare で可能。
+
+### PR #13a — CO2 反応拡散 PDE ソルバ
 - `backend/app/pipeline/co2_diffusion.py`: 定常反応拡散方程式
   `∇·(D∇C) - r·C = 0` を有限体積で解く。Dirichlet BC は気孔で C=Ci、
   反応項 r·C は葉緑体セル (または葉肉セル) で有効。scipy.sparse +
