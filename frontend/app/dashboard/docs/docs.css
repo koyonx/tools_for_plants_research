@@ -1,0 +1,45 @@
+/* Small prose tweaks for the docs pane.  Most styling is handled by
+   the per-element Tailwind classes in MarkdownDoc; this file layers
+   on the bits that are awkward to set there (KaTeX color inheritance,
+   table-of-contents auto-link color, mermaid label color). */
+
+.docs-prose .katex,
+.docs-prose .katex * {
+  color: inherit;
+}
+
+.docs-prose .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+/* rehype-autolink-headings wraps the heading text in an <a>;
+   suppress the default visited color so headings stay readable. */
+.docs-prose h1 > a,
+.docs-prose h2 > a,
+.docs-prose h3 > a,
+.docs-prose h4 > a,
+.docs-prose h5 > a,
+.docs-prose h6 > a {
+  color: inherit;
+  text-decoration: none;
+}
+.docs-prose h1 > a:hover,
+.docs-prose h2 > a:hover,
+.docs-prose h3 > a:hover,
+.docs-prose h4 > a:hover {
+  text-decoration: underline;
+}
+
+/* GFM task-list checkbox spacing */
+.docs-prose li.task-list-item > input[type="checkbox"] {
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+/* Footnote reference / backref markers look better with a little
+   breathing room than the default inline run. */
+.docs-prose sup a {
+  padding: 0 0.15rem;
+}

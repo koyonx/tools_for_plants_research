@@ -6,7 +6,37 @@ hasn't tagged a release yet, so everything below is on `main`.
 
 ## [Unreleased]
 
-### PR #14 — 文献照合 + 比較レポートエクスポート (current, ロードマップ最終)
+### PR #15 — Docs サイト (Markdown / KaTeX / Mermaid / 画像 / 動画) (current)
+- `frontend/lib/docs.ts` + `frontend/lib/docs-client.ts`: `content/docs/`
+  配下の `.md` ファイルを front-matter ごとに走査し、サイドバー用の
+  ツリーと slug 解決を提供。client / server 境界を分けて FS 依存を
+  ブラウザバンドルに混入させない。
+- `frontend/components/docs/MarkdownDoc.tsx`: react-markdown +
+  remark-gfm + remark-math + rehype-katex + rehype-slug +
+  rehype-autolink-headings + rehype-raw を組み合わせた pluggable
+  レンダラ。`![cap](foo.mp4)` を自動で `<video>` に upgrade、
+  YouTube / Vimeo `<iframe>` をホワイトリスト経由で許可、
+  `<script>` は構文上書き混入しても render 段階で除去。
+- `frontend/components/docs/Mermaid.tsx`: mermaid を dynamic import
+  して strict security level で初期化、parse エラーは UI に inline
+  でフィードバック。flowchart / sequence / class / state / ER /
+  gantt / pie / gitGraph / C4 をすべてサポート。
+- `frontend/components/docs/CodeBlock.tsx`: react-syntax-highlighter
+  (Prism) で 100+ 言語のシンタックスハイライト、prefers-color-scheme
+  でライト / ダークテーマ追従。
+- `/dashboard/docs` ルート (index.md) と `/dashboard/docs/[...slug]`
+  catch-all ルート、左カテゴリ別サイドバー + メイン本文の 2 ペイン。
+  ヘッダー nav に「Docs」リンク追加。
+- `frontend/content/docs/`: 13 本のドキュメント (はじめに / ワーク
+  フロー / 7 パイプライン / 統計比較 / 文献照合 / レポート export /
+  Markdown チートシート)。各記法のサンプル + 全 PR の理論を網羅。
+- `frontend/public/docs-assets/`: ローカル画像 / 動画の置き場。
+  `/docs-assets/foo.png` で参照、後で操作者が差し替え可能。
+- `next.config.mjs`: `outputFileTracingIncludes` で
+  `content/docs/**/*.md` を standalone ビルドに同梱、production
+  でも fs.readFile が解決するよう保証。
+
+### PR #14 — 文献照合 + 比較レポートエクスポート (ロードマップ最終)
 - `backend/app/pipeline/literature_ranges.py`: 主要形態・流体・CO2
   パラメータの C3/C4/CAM 別の文献レンジを一元管理する静的カタログ
   (Evans, Tosens, Flexas, Terashima, Wullschleger, Atkin, Poorter
