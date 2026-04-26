@@ -66,9 +66,24 @@ export async function loadDoc(slug: string[]): Promise<LoadedDoc | null> {
     if (!/^[a-z0-9][a-z0-9._-]*$/i.test(seg)) return null;
   }
   const filePath = path.join(DOCS_ROOT, ...slugFile(slug));
+
+  // Round-1 BLOCKER: the slug regex blocks `..`, but a stray symlink
+  // inside `content/docs/` could still escape DOCS_ROOT.  Resolve
+  // through realpath and refuse to read anything that lands outside.
+  let resolvedPath: string;
+  let resolvedRoot: string;
+  try {
+    resolvedPath = await fs.realpath(filePath);
+    resolvedRoot = await fs.realpath(DOCS_ROOT);
+  } catch {
+    return null;
+  }
+  const rel = path.relative(resolvedRoot, resolvedPath);
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+
   let raw: string;
   try {
-    raw = await fs.readFile(filePath, "utf8");
+    raw = await fs.readFile(resolvedPath, "utf8");
   } catch {
     return null;
   }

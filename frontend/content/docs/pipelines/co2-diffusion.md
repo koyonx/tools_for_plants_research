@@ -91,10 +91,16 @@ $$
 
 ## デモ
 
-下の動画は C3 サンプル（Arabidopsis, 40×）で Cc フィールドが
-収束していく様子を 8× 倍速で記録したものです。
+C3 サンプル（Arabidopsis, 40×）で Cc フィールドが収束していく
+様子を記録した動画を `public/docs-assets/co2-field-demo.mp4`
+に置けば、以下のような image syntax で `<video controls>` に
+自動 upgrade されます。
 
-![CO2 field convergence demo](/docs-assets/co2-field-demo.mp4)
+```markdown
+![CO2 field convergence demo](/docs-assets/co2-field-demo.mp4 "8x 倍速")
+```
+
+![解析対象の例（プレースホルダー）](/docs-assets/placeholder.svg "ここに Cc 収束の中間ステップ静止画を置く")
 
 ## よくある落とし穴
 

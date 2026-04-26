@@ -57,9 +57,9 @@ $\tau$ マッチング順序は
 
 画像詳細ページの右上に表示されるバッジで、状態が色分けされます。
 
-- <mark style="background-color: #d1fae5">within</mark> — 全指標が範囲内
-- <mark style="background-color: #fef3c7">outside</mark> — いずれかが下/上
-- <mark style="background-color: #f3f4f6">unknown</mark> — 範囲なし or 未計算
+- 🟢 **within** — 全指標が範囲内
+- 🟡 **outside** — いずれかが下/上
+- ⚪ **unknown** — 範囲なし or 未計算
 
 クリックで findings リストが展開し、
 `measured → status` と出典を 1 行で表示。

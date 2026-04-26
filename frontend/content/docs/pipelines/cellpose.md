@@ -98,4 +98,4 @@ Content-Type: application/json
 
 画像詳細ページの <kbd>細胞検出</kbd> パネルからワンクリックで実行できます。
 
-![Cellpose オーバーレイ（例）](/docs-assets/cellpose-overlay.png)
+![Cellpose オーバーレイ（プレースホルダー）](/docs-assets/placeholder.svg "ここに細胞ポリゴンのオーバーレイを置く")

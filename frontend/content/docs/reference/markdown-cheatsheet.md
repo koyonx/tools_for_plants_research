@@ -211,7 +211,7 @@ erDiagram
 
 ```mermaid
 gantt
-    title PR #14 ロードマップ
+    title 内部ロードマップ PR #8〜#14（GitHub PR 番号とは別体系）
     dateFormat YYYY-MM-DD
     section 形態
     基本計測         :done, a1, 2026-01-10, 5d
@@ -272,8 +272,10 @@ C4Context
 ### ローカル画像
 
 画像ファイルは `frontend/public/docs-assets/` に置き、`/docs-assets/foo.png` で参照。
+リポジトリにはプレースホルダー SVG だけ同梱しており、
+新しい画像はオペレーターが追加してください。
 
-![S_mes/S 可視化（例）](/docs-assets/s-mes-s-example.png "細胞輪郭オーバーレイ")
+![プレースホルダー画像](/docs-assets/placeholder.svg "ここに任意の png/jpg/webp を置く")
 
 ### 外部画像
 
@@ -281,14 +283,22 @@ C4Context
 
 ### 動画（拡張子で自動判定）
 
-`![caption](foo.mp4)` と書けば `<video controls>` に差し替わります。
+`![caption](foo.mp4)` のように `.mp4` / `.webm` / `.mov` / `.ogv` / `.m4v`
+で終わる URL を image syntax で書けば `<video controls>` に差し替わります。
+リポジトリには動画プレースホルダーは同梱しないので、
+ファイルを `frontend/public/docs-assets/` に配置してから参照してください。
 
+```markdown
 ![解析デモ動画](/docs-assets/demo.mp4 "8x 倍速")
+```
 
 ### YouTube 埋め込み
 
-ホワイトリストされたドメイン (`youtube.com` / `youtu.be` / `vimeo.com`) のみ
-`<iframe>` で許可されます。
+`<iframe>` は **`youtube.com` / `youtube-nocookie.com` / `player.vimeo.com`**
+（プライベート動画も含む embed URL）のみホワイトリストされています。
+これ以外のドメインの iframe はレンダリング時に `null` で破棄されるので、
+`youtu.be/<id>` 短縮 URL ではなく
+`https://www.youtube-nocookie.com/embed/<id>` 形式で書いてください。
 
 <iframe src="https://www.youtube-nocookie.com/embed/aircAruvnKk" title="3Blue1Brown on neural nets" width="560" height="315" allowfullscreen></iframe>
 
@@ -300,7 +310,13 @@ C4Context
 
 ## インライン HTML
 
-簡単なものは素通しで使えます（scripts/inline onclick は自動除去）。
+`rehype-sanitize` で安全な subset のみ通します。許可されているのは
+`<details>` / `<summary>` / `<kbd>` / `<mark>` / `<sub>` / `<sup>` /
+`<abbr>` / `<time>` / `<u>` / `<s>` / `<del>` / `<figure>` / `<figcaption>`
+等。`<script>` / `<style>` / `<link>` / `<object>` / `<embed>` / `<form>`
+やイベントハンドラ属性 (`onclick=` 等) は構文上書いても除去されます。
+`style="..."` 属性も値経由の XSS を防ぐため許可していないので、
+色付けは Tailwind 由来のテーマカラーやアイコン文字で表現してください。
 
 <details>
 <summary>details / summary</summary>

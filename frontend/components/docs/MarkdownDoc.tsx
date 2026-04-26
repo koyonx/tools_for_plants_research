@@ -5,11 +5,98 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { CodeBlock } from "./CodeBlock";
 import { Mermaid } from "./Mermaid";
+
+// Allow-list extensions on top of `defaultSchema`.  Round-1 BLOCKER:
+// without sanitize, raw <style>/<link>/<object>/<embed>/<form>/<input>
+// in a .md file would have been rendered.  With this schema:
+//
+//   - HTML5 inline semantics (kbd/mark/sub/sup/abbr/time/details) are
+//     allowed (`details` already exists in defaultSchema; the rest are
+//     either added or default-allowed).
+//   - <video>/<source>/<iframe> are explicitly allowed but with a
+//     pinned attribute list — runtime <iframe> URL whitelisting still
+//     happens in the component override below.
+//   - className is preserved on span/div/code/pre so that KaTeX (which
+//     keys off `.math` / `.katex*`) and rehype-pretty-code do not lose
+//     their styling hooks.
+//   - `style` attribute is NOT allowed: it's a vector for
+//     `background-image: url(javascript:...)` and similar tricks.
+//   - <script>/<link>/<object>/<embed>/<form> are NOT in the allow-list
+//     so they are dropped by sanitize before they ever reach React.
+const sanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [
+    ...((defaultSchema.tagNames as string[] | undefined) ?? []),
+    "details",
+    "summary",
+    "kbd",
+    "mark",
+    "video",
+    "source",
+    "iframe",
+    "figure",
+    "figcaption",
+    "time",
+    "abbr",
+    "sub",
+    "sup",
+    "u",
+    "s",
+    "del",
+  ],
+  attributes: {
+    ...defaultSchema.attributes,
+    "*": [
+      ...((defaultSchema.attributes?.["*"] as Array<string | [string, ...unknown[]]>) ?? []),
+      "className",
+      "id",
+      "title",
+    ],
+    iframe: [
+      "src",
+      "title",
+      "width",
+      "height",
+      "allow",
+      "allowFullScreen",
+      "frameBorder",
+      "referrerPolicy",
+      "loading",
+    ],
+    video: [
+      "src",
+      "controls",
+      "preload",
+      "poster",
+      "width",
+      "height",
+      "loop",
+      "muted",
+      "playsInline",
+    ],
+    source: ["src", "type"],
+    img: ["src", "alt", "title", "loading", "width", "height"],
+    a: ["href", "title", "target", "rel"],
+    code: ["className"],
+    pre: ["className"],
+    span: ["className"],
+    div: ["className"],
+    th: ["align", "scope", "colSpan", "rowSpan"],
+    td: ["align", "colSpan", "rowSpan"],
+    input: ["type", "checked", "disabled"],
+    time: ["dateTime"],
+  },
+  protocols: {
+    ...defaultSchema.protocols,
+    src: ["http", "https", "data"],
+  },
+};
 
 type Props = {
   source: string;
@@ -227,7 +314,15 @@ export function MarkdownDoc({ source }: Props) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[
+          // Order matters:
+          //   raw  — turn raw HTML strings into HAST nodes
+          //   sanitize — drop everything not in the allow-list (must run
+          //     BEFORE katex so katex's own classes survive untouched)
+          //   katex — replace `<span class="math">$...$</span>` with the
+          //     rendered SVG/HTML output
+          //   slug + autolink — anchor each heading
           rehypeRaw,
+          [rehypeSanitize, sanitizeSchema],
           rehypeKatex,
           rehypeSlug,
           [

@@ -95,10 +95,10 @@ Content-Type: application/json
 
 ## 表示例
 
-<!-- 画像を差し替える場合は public/docs-assets/ 配下に配置して
-     相対 URL で参照してください。 ![caption](/docs-assets/foo.png) -->
+<!-- 実画像は public/docs-assets/basic-measurement.png に配置すると
+     placeholder.svg から差し替わります。 -->
 
-![葉厚プロファイル（例）](/docs-assets/basic-measurement.png "ThicknessChart のダミー表示")
+![葉厚プロファイル（プレースホルダー）](/docs-assets/placeholder.svg "ここに ThicknessChart のスクリーンショットを置く")
 
 プロファイルが極端にギザつく場合は、画像の **二値化閾値** を見直すか、
 ノイズが多いエッジを切り落とすクロップを先に行ってください。

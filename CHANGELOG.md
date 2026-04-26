@@ -4,6 +4,11 @@ All notable changes to **tools_for_plants_research**.  Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 hasn't tagged a release yet, so everything below is on `main`.
 
+> **Note** — `PR #N` headings below refer to the **internal roadmap
+> number** maintained for project planning, *not* the GitHub PR number.
+> The two diverged after PR #1 was split into preparatory work; the
+> mapping is kept inside each PR description on GitHub for cross-reference.
+
 ## [Unreleased]
 
 ### PR #15 — Docs サイト (Markdown / KaTeX / Mermaid / 画像 / 動画) (current)
