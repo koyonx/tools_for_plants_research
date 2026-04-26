@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 320" width="600" height="320" role="img" aria-label="ドキュメント画像のプレースホルダー">
+  <rect width="600" height="320" fill="#f3f4f6" stroke="#d4d4d8" stroke-width="2" rx="8"/>
+  <g fill="#9ca3af">
+    <circle cx="120" cy="120" r="32"/>
+    <path d="M40 240 L200 120 L320 220 L420 160 L560 280 L40 280 Z"/>
+  </g>
+  <text x="300" y="180" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" fill="#374151">画像差し替え予定</text>
+  <text x="300" y="208" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#6b7280">frontend/public/docs-assets/ に png/jpg/webp を配置すると差し替わります</text>
+</svg>
