@@ -31,16 +31,16 @@ import { Mermaid } from "./Mermaid";
 //     so they are dropped by sanitize before they ever reach React.
 const sanitizeSchema = {
   ...defaultSchema,
-  // Round-2: remark-gfm already prefixes footnote `id`/`href` with
-  // `user-content-` to dodge id-collisions with hosting page chrome.
-  // rehype-sanitize's default `clobberPrefix: "user-content-"` would
-  // re-prefix the `id` (and the matched `clobber: ["name", "id"]`
-  // attribute), producing `user-content-user-content-fn-1` on one
-  // side and `user-content-fn-1` on the other.  The result: footnote
-  // jumps and back-references stop resolving.  Disable the second
-  // prefix here — remark-gfm's prefixing alone is enough.
-  clobberPrefix: "",
-  clobber: [],
+  // Round-3: keep rehype-sanitize's full DOM-clobbering defense
+  // (`clobberPrefix: "user-content-"`, `clobber: ["name", "id"]` from
+  // defaultSchema), so a doc cannot ship `<a id="location">` /
+  // `<input name="signout">` and shadow window/document named
+  // properties.  The footnote double-prefix problem is solved by
+  // (a) telling remark-rehype not to prefix in advance via
+  // `remarkRehypeOptions={{ clobberPrefix: "" }}` below, then
+  // (b) running `mirrorFootnoteHrefPrefix` after sanitize to mirror
+  // sanitize's id-prefix on every `href="#fn-*"` / `#fnref-*"`
+  // fragment so forward + back references resolve.
   tagNames: [
     ...((defaultSchema.tagNames as string[] | undefined) ?? []),
     "details",
@@ -107,6 +107,38 @@ const sanitizeSchema = {
     src: ["http", "https", "data"],
   },
 };
+
+// Mirror rehype-sanitize's `clobberPrefix` onto footnote-style fragment
+// hrefs.  Sanitize prefixes every `id`/`name` attribute value (so a raw
+// `<a id="location">` becomes `id="user-content-location"` and can no
+// longer shadow `window.location`), but it does not rewrite the
+// fragment portion of `href` values — yet the GFM footnote pipeline
+// needs `href="#fn-a"` to point at the prefixed id `user-content-fn-a`.
+// Without this fix, ref → body → backref clicks all 404.  Limit the
+// rewrite to the well-known footnote prefix family (`fn-*` / `fnref-*`)
+// so the plugin can't be tricked into rewriting unrelated links.
+const SANITIZE_CLOBBER_PREFIX = "user-content-";
+const FOOTNOTE_HREF_RE = /^#(?:fn|fnref)-[\w-]+$/;
+type HastNode = {
+  type?: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+};
+function mirrorFootnoteHrefPrefix() {
+  const walk = (node: HastNode | null | undefined): void => {
+    if (!node) return;
+    if (node.type === "element" && node.tagName === "a") {
+      const href = node.properties?.href;
+      if (typeof href === "string" && FOOTNOTE_HREF_RE.test(href)) {
+        node.properties = node.properties ?? {};
+        node.properties.href = `#${SANITIZE_CLOBBER_PREFIX}${href.slice(1)}`;
+      }
+    }
+    if (Array.isArray(node.children)) for (const c of node.children) walk(c);
+  };
+  return (tree: HastNode) => walk(tree);
+}
 
 type Props = {
   source: string;
@@ -323,6 +355,12 @@ export function MarkdownDoc({ source }: Props) {
     <div className="docs-prose max-w-none text-[15px] text-neutral-900 dark:text-neutral-100">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
+        // Tell the remark→rehype bridge to emit unprefixed footnote
+        // ids (e.g. `id="fn-a"`, `href="#fn-a"`).  Then the sanitize
+        // pass below applies its own `clobberPrefix: "user-content-"`
+        // to every id/href in lockstep.  Without this, the prefix
+        // would be applied twice — see round-3 review.
+        remarkRehypeOptions={{ clobberPrefix: "" }}
         rehypePlugins={[
           // Order matters:
           //   raw  — turn raw HTML strings into HAST nodes
@@ -333,6 +371,7 @@ export function MarkdownDoc({ source }: Props) {
           //   slug + autolink — anchor each heading
           rehypeRaw,
           [rehypeSanitize, sanitizeSchema],
+          mirrorFootnoteHrefPrefix,
           rehypeKatex,
           rehypeSlug,
           [
