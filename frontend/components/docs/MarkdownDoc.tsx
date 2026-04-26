@@ -31,6 +31,16 @@ import { Mermaid } from "./Mermaid";
 //     so they are dropped by sanitize before they ever reach React.
 const sanitizeSchema = {
   ...defaultSchema,
+  // Round-2: remark-gfm already prefixes footnote `id`/`href` with
+  // `user-content-` to dodge id-collisions with hosting page chrome.
+  // rehype-sanitize's default `clobberPrefix: "user-content-"` would
+  // re-prefix the `id` (and the matched `clobber: ["name", "id"]`
+  // attribute), producing `user-content-user-content-fn-1` on one
+  // side and `user-content-fn-1` on the other.  The result: footnote
+  // jumps and back-references stop resolving.  Disable the second
+  // prefix here — remark-gfm's prefixing alone is enough.
+  clobberPrefix: "",
+  clobber: [],
   tagNames: [
     ...((defaultSchema.tagNames as string[] | undefined) ?? []),
     "details",
