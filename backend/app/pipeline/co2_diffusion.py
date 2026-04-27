@@ -740,11 +740,18 @@ def compute_co2_diffusion(
     else:
         reaction_volume_integral = 0.0
 
-    # Conservation cross-check.  In steady state, the boundary supply
-    # through the stomata equals (a_net = signed flux INTO sink) +
-    # (signed reaction integral over the sink).  Using the signed
-    # form makes the equation physically exact even when M-M produces
-    # local release at C < Γ*.
+    # Conservation cross-check.  In steady state, three quantities are
+    # numerically identical (divergence theorem on the leaf interior):
+    #
+    #     stomata_supply  = a_net  = ∫R(C) dV
+    #
+    # where stomata_supply is the flux LEAVING the Dirichlet stomata
+    # face into the leaf, a_net is the flux INTO the sink across its
+    # interior boundary, and ∫R(C) dV is the volumetric consumption
+    # inside the sink.  Pre-PR #19 the old code asserted
+    # `stomata_supply == a_net + ∫R` which double-counts; in steady
+    # state for a single sink that's a 2× discrepancy.  The fix is to
+    # check the actual physical equation: `stomata_supply == ∫R(C) dV`.
     #
     # Allow up to 5 % imbalance before flagging — sharp gas/liquid
     # diffusivity ratios (1.6e-5 vs 1.79e-9) introduce harmonic-mean
@@ -753,14 +760,13 @@ def compute_co2_diffusion(
     stomata_supply = _boundary_outflow(dirichlet)  # flux LEAVING stomata = supply
     notes: list[str] = []
     if stomata_supply > 0:
-        expected_supply = a_net + reaction_volume_integral
-        imbalance = abs(stomata_supply - expected_supply) / stomata_supply
+        imbalance = abs(stomata_supply - reaction_volume_integral) / stomata_supply
         if imbalance > 0.05:
             notes.append(
-                f"stomata supply vs (a_net + R-integral) imbalance = "
-                f"{imbalance:.2%}; expected < 5 % after Picard "
-                "convergence.  Check the chloroplast mask covers all "
-                "consuming cells or increase max_side_px / picard_max_iter."
+                f"stomata supply vs ∫R(C) imbalance = {imbalance:.2%}; "
+                "expected < 5 % after Picard convergence.  Check the "
+                "chloroplast mask covers all consuming cells or "
+                "increase max_side_px / picard_max_iter."
             )
     if n_non_finite > 0:
         notes.append(

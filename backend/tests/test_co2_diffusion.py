@@ -646,10 +646,10 @@ def test_mm_negative_kinetics_constants_rejected() -> None:
 
 def test_mm_mass_conservation_within_tolerance() -> None:
     """In steady state the boundary supply through the stomata must
-    match A_net + (signed) integral R(C) over the sink within the FV
-    discretization error.  After Picard convergence this imbalance
-    should NOT trigger the >5 % notes warning even on the small
-    40×100 test grid.
+    match the volume integral of R(C) over the sink — divergence
+    theorem applied to the leaf interior gives that exactly.  After
+    Picard convergence this imbalance should NOT trigger the >5 %
+    notes warning even on the small 40×100 test grid.
 
     The 5 % cap comes from the harmonic-mean face conductivity error
     at the gas/liquid interface (D_IAS / D_palisade ≈ 10⁴), which is
