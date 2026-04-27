@@ -23,10 +23,16 @@ kinetics are supported:
         Solve  ∇·(D∇C) − b · C = a   for C^(k)
         Iterate until ||C^(k) − C^(k-1)||_∞ < tol.
 
-    In steady state the volume integral of R equals the boundary
-    influx through the stomatal Dirichlet faces (mass conservation),
-    so A_net comes from either route — we use the volumetric form
-    because it's more direct.
+    In steady state the divergence theorem gives three identical
+    quantities: the stomata supply (boundary flux out of the
+    Dirichlet face), `a_net` (boundary flux into the sink), and
+    `∫R(C)dV` (volumetric integral of the reaction over the sink).
+    The implementation reports `a_net` from the **boundary form**
+    (`-_boundary_outflow(sink_interior)`) because it is the discretely
+    conservative quantity that the FV solver computes exactly; the
+    volumetric integral is then used as an independent cross-check
+    that flags discretisation / Picard convergence issues in `notes`
+    when the two disagree by > 5 %.
 
   * ``linear`` (legacy) — first-order draw R(C) = r · C used in the
     PR #13a prototype.  Kept as an option for sensitivity studies

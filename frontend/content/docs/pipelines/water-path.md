@@ -111,7 +111,7 @@ flowchart TD
 |---|---|
 | `centroid` | sink 中心 (px) |
 | `travel_time` | T 値 (抵抗単位) |
-| `travel_time_um` | µm 換算 (un_per_px が無いと None) |
+| `travel_time_um` | µm 換算 (`um_per_px` が無いと None) |
 | `straight_line_um` | 直線距離 (µm) |
 | `nearest_source` | 起点 vessel 画素 |
 | `route` | back-tracking した経路 polyline |
@@ -140,9 +140,11 @@ Content-Type: application/json
 
 ## 実装上の注意
 
-- 速度 `F` の最小値は数値安定のため $10^{-6}$ にクリップ
-  (`pipeline/water_path.py:286`)。infinity speed は upwind スキームで
-  発散するため。
+- 抵抗 $w$ の **下限を `1e-3` でガード** してから速度 $F = 1/w$ を
+  作ります (`speed = 1.0 / np.maximum(cost, 1e-3)`、
+  `pipeline/water_path.py` 内)。これにより無限大速度が upwind
+  スキームで発散するのを防止 — $F$ の上限はおおよそ $10^{3}$ で
+  抑えられる形。
 - 軌跡 back-tracking は最大 15,000 ステップで打ち切り。長過ぎる経路
   は `truncated: true` で返す。
 - source が空（`xylem_vessel` も `xylem` も無い）のとき

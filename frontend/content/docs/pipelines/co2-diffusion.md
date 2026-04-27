@@ -139,7 +139,8 @@ $$
 $$
 
 実装はこのうち **sink 境界面の符号付き法線フラックス** を A_net として
-報告 (`a_net = -_boundary_outflow(sink_interior)`、`pipeline/co2_diffusion.py:718`)。
+報告 (`a_net = -_boundary_outflow(sink_interior)` in
+`pipeline/co2_diffusion.py`)。
 M-M モードで $R(C)$ が局所的に負になる領域があっても、boundary flux
 形式は自動でその寄与を取り込むため、`A_net` は **正味の Rubisco
 カルボキシレーション速度** (mol s⁻¹ m⁻¹_depth) として一貫した
