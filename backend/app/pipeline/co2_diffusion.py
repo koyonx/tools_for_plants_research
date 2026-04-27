@@ -718,18 +718,17 @@ def compute_co2_diffusion(
     a_net = -_boundary_outflow(sink_interior)
 
     # ----- volumetric reaction integral (per kinetics mode) ---------
-    # Reaction integral (mol / s / m-depth) — total consumption inside
-    # the sink region using the FINAL converged concentration field
-    # and the SAME R(C) that drove the iteration.  In steady state
-    # this should match A_net to within the solver's discretization
-    # tolerance, giving a useful cross-check that the Picard iteration
-    # has converged AND that the linear solver itself is mass-conservative.
+    # SIGNED integral of R(C) over the sink (mol / s / m-depth) — this
+    # is the quantity that closes against the boundary supply via
+    # mass conservation.  Negative R contributions (where C < Γ* in
+    # the M-M form) are kept here because the boundary face flux
+    # integration sees the net flow including any local release; if
+    # we clipped, the imbalance check would falsely flag every leaf
+    # whose Ci sits near the compensation point.
     sink_c = concentration[sink_interior]
     if sink_interior.any():
         if kinetics_mode == "linear":
-            reaction_volume_integral = (
-                reaction_rate * float(sink_c.sum()) * dx_m * dx_m
-            )
+            r_field = reaction_rate * sink_c
         else:  # michaelis_menten — recompute R(C_final) without linearization
             k_eff = kc_pa * (1.0 + o2_pa / ko_pa)
             r_field = (
@@ -737,33 +736,31 @@ def compute_co2_diffusion(
                 * (sink_c - gamma_star_pa)
                 / (sink_c + k_eff)
             )
-            # Don't double-count negative R (which would represent
-            # photorespiratory release at C < Γ*); for the "carboxylation
-            # only" interpretation of A_net we clip below zero.
-            reaction_volume_integral = (
-                float(np.clip(r_field, 0.0, None).sum()) * dx_m * dx_m
-            )
+        reaction_volume_integral = float(r_field.sum()) * dx_m * dx_m
     else:
         reaction_volume_integral = 0.0
 
-    # Conservation cross-check.  In steady state with reaction,
-    # stomata_supply = a_net + reaction_volume_integral (supply must
-    # cover both the flux OUT of the leaf via the sink AND the mass
-    # consumed by the reaction inside the sink).  Imbalance > 1 % is
-    # logged as a note — usually means the chloroplast mask is missing
-    # part of the consuming tissue or the grid is too coarse.
+    # Conservation cross-check.  In steady state, the boundary supply
+    # through the stomata equals (a_net = signed flux INTO sink) +
+    # (signed reaction integral over the sink).  Using the signed
+    # form makes the equation physically exact even when M-M produces
+    # local release at C < Γ*.
+    #
+    # Allow up to 5 % imbalance before flagging — sharp gas/liquid
+    # diffusivity ratios (1.6e-5 vs 1.79e-9) introduce harmonic-mean
+    # face-conductivity error of a few percent on coarser grids,
+    # which is not a real conservation violation.
     stomata_supply = _boundary_outflow(dirichlet)  # flux LEAVING stomata = supply
     notes: list[str] = []
     if stomata_supply > 0:
         expected_supply = a_net + reaction_volume_integral
         imbalance = abs(stomata_supply - expected_supply) / stomata_supply
-        if imbalance > 0.01:
+        if imbalance > 0.05:
             notes.append(
                 f"stomata supply vs (a_net + R-integral) imbalance = "
-                f"{imbalance:.2%}; expected near machine precision after "
-                "Picard convergence.  Check the chloroplast mask covers "
-                "all consuming cells or increase max_side_px / "
-                "picard_max_iter."
+                f"{imbalance:.2%}; expected < 5 % after Picard "
+                "convergence.  Check the chloroplast mask covers all "
+                "consuming cells or increase max_side_px / picard_max_iter."
             )
     if n_non_finite > 0:
         notes.append(

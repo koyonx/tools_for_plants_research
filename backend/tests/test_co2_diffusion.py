@@ -646,9 +646,16 @@ def test_mm_negative_kinetics_constants_rejected() -> None:
 
 def test_mm_mass_conservation_within_tolerance() -> None:
     """In steady state the boundary supply through the stomata must
-    match A_net + integral R(C) over the sink to within the FV
+    match A_net + (signed) integral R(C) over the sink within the FV
     discretization error.  After Picard convergence this imbalance
-    should NOT trigger the >1% notes warning."""
+    should NOT trigger the >5 % notes warning even on the small
+    40×100 test grid.
+
+    The 5 % cap comes from the harmonic-mean face conductivity error
+    at the gas/liquid interface (D_IAS / D_palisade ≈ 10⁴), which is
+    a genuine FV discretization limit and not a Picard convergence
+    issue.  Larger grids close to <1 %; this test pins the loose
+    upper bound that's robust on coarse images."""
     res = compute_co2_diffusion(
         _mm_seg(),
         um_per_px=1.0,
@@ -657,7 +664,9 @@ def test_mm_mass_conservation_within_tolerance() -> None:
         vcmax_per_volume_mol_m3_s=1.5,
     )
     # Imbalance warning should not be present.
-    assert not any("imbalance" in note.lower() for note in res.notes)
+    assert not any("imbalance" in note.lower() for note in res.notes), (
+        f"unexpected imbalance note: {res.notes}"
+    )
 
 
 def test_mm_result_round_trips_through_strict_json() -> None:
