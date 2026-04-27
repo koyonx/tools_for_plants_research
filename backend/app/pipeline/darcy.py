@@ -53,6 +53,15 @@ from scipy.sparse.linalg import spsolve
 # constant in the temperature regime plant physiology works in.
 WATER_VISCOSITY_PA_S = 8.9e-4
 
+# Liquid water density at 25 °C ≈ 997 kg/m³.  Used to convert
+# volumetric flux q [m³/(s·m-depth) = m²/s] into mass flux M [kg/(s·m-depth)]
+# at report time, so the publicly-named ``flow`` / ``flow_in`` /
+# ``flow_out`` / ``k_leaf`` fields actually carry the kg-based units
+# their docstrings (and the literature on K_leaf) advertise.  The
+# round-3 docs audit caught that the previous implementation reported
+# the volumetric flux under a kg-flux label.
+WATER_DENSITY_KG_M3 = 997.0
+
 # Per-class permeability k (m²) scaled relative to mesophyll (palisade).
 # These are heuristic — real xylem vessels are >3 orders of magnitude
 # more permeable than cell-wall water.  Absolute values don't need to
@@ -504,15 +513,20 @@ def compute_darcy(
 
     source_bool = source_mask > 0
     sink_bool = sink_mask > 0
-    flow_in = _boundary_outflow(source_bool)
+    # `_boundary_outflow` returns the volumetric flux [m²/s = m³/(s·m-depth)].
+    # Multiply by water density to obtain the publicly-advertised mass
+    # flux units of kg/(s·m-depth).
+    flow_in = _boundary_outflow(source_bool) * WATER_DENSITY_KG_M3
     # `_boundary_outflow(sink)` returns flux LEAVING sink — water
     # entering sink from leaf = - that.  Negate to keep both numbers
     # positive in the typical configuration (P_xylem > P_stomata).
-    flow_out = -_boundary_outflow(sink_bool)
+    flow_out = -_boundary_outflow(sink_bool) * WATER_DENSITY_KG_M3
 
     pressure_drop = abs(p_xylem_pa - p_stomata_pa)
     k_leaf: float | None
     if pressure_drop > 0 and flow_out > 0 and np.isfinite(flow_out):
+        # K_leaf = flow_out / ΔP — units kg/(s·Pa·m-depth) once flow_out
+        # is in kg/(s·m-depth).
         k_leaf = flow_out / pressure_drop
     else:
         k_leaf = None
@@ -536,7 +550,9 @@ def compute_darcy(
         cv2.fillPoly(single_mask, [pts.reshape(-1, 1, 2)], color=(255,))
         single_bool = single_mask > 0
         # Flow ENTERING this stomatum = - signed flux LEAVING it.
-        single_flow = -_boundary_outflow(single_bool)
+        # Multiply by water density so the per-stomatum number
+        # carries the same kg/(s·m-depth) units as the aggregate.
+        single_flow = -_boundary_outflow(single_bool) * WATER_DENSITY_KG_M3
         # Sample mean velocity in the leaf interior cells DIRECTLY
         # adjacent to this stomatum (1-px outer ring intersected
         # with non-Dirichlet leaf).  v_mag inside the stomatum body

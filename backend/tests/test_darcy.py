@@ -174,9 +174,17 @@ def test_k_leaf_matches_analytical_1d_conductance() -> None:
     Analytical form for a pure-palisade slab of length L and
     cross-section A per metre depth (== h * dx_m):
 
-        flow_out = K_palisade * A * ΔP / L
-        K_leaf   = flow_out / ΔP = K_palisade * A / L
+        Q_volumetric  = (k / μ) * A * ΔP / L              [m³/(s·m-depth)]
+        Q_mass        = ρ_water * Q_volumetric             [kg/(s·m-depth)]
+        K_leaf        = Q_mass / ΔP = ρ_water * (k/μ) * A / L
+                        [kg / (s · Pa · m-depth)]
+
+    The ρ_water factor was introduced when fixing the round-3 docs
+    audit BLOCKER ("flow reported in m²/s but labelled kg/s"); the
+    analytical reference must include it to keep the test in sync.
     """
+    from app.pipeline.darcy import WATER_DENSITY_KG_M3
+
     h, w = 20, 200
     polygons = [
         _rect(0, 0, w, h, "palisade"),
@@ -199,7 +207,7 @@ def test_k_leaf_matches_analytical_1d_conductance() -> None:
     # columns between the xylem band (0..2) and the sink band (w-3..w-1).
     cross_section_m = h * dx_m
     length_m = (w - 6) * dx_m
-    k_leaf_analytic = perm * cross_section_m / length_m
+    k_leaf_analytic = WATER_DENSITY_KG_M3 * perm * cross_section_m / length_m
     assert res.k_leaf is not None
     # Tightened from rel=0.05 to rel=0.005 in round-2 — the discrete
     # FV stencil reproduces the analytical 1D conductance to better
@@ -252,13 +260,19 @@ def test_dirichlet_touching_does_not_inflate_k_leaf() -> None:
     # 0.5 * (K_xylem + K_stomata) ≈ K_xylem/2 = 5.6e-9 for a
     # 3-cell shared face.  The interior palisade path has
     # conductance ≈ K_palisade * h * dx / w ≈ 1.1e-11 * 30e-6 / 50e-6
-    # ≈ 6.7e-12, FOUR orders of magnitude smaller.  So as long as
-    # K_leaf is well below 1e-9 we know the BC shortcut is excluded.
+    # ≈ 6.7e-12, FOUR orders of magnitude smaller.  After the round-3
+    # docs-audit fix multiplies flow_out by ρ_water (997 kg/m³) on
+    # output, both the BC-shortcut value and the interior path scale
+    # by the same factor — so the boundary stays "interior K_leaf is
+    # 4 orders of magnitude smaller than the shortcut".  Threshold
+    # bumped from 1e-10 to 1e-7 to keep the shortcut detector at the
+    # same fractional sensitivity post-density-multiplication.
     assert res.k_leaf is not None
     assert res.k_leaf > 0
-    assert res.k_leaf < 1.0e-10, (
+    assert res.k_leaf < 1.0e-7, (
         f"K_leaf={res.k_leaf:.2e} suggests the BC-to-BC shortcut "
-        f"face is being counted; expected < 1e-10 (interior path only)"
+        f"face is being counted; expected < 1e-7 (interior path only, "
+        "post-ρ_water multiplication)"
     )
 
 

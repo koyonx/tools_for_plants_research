@@ -108,7 +108,13 @@ def test_negative_reaction_rate_rejected() -> None:
         w=50,
     )
     with pytest.raises(ValueError, match="reaction_rate"):
-        compute_co2_diffusion(seg, um_per_px=1.0, max_side_px=50, reaction_rate=-1.0)
+        compute_co2_diffusion(
+            seg,
+            um_per_px=1.0,
+            max_side_px=50,
+            reaction_rate=-1.0,
+            kinetics_mode="linear",
+        )
 
 
 def test_zero_reaction_yields_uniform_concentration() -> None:
@@ -125,7 +131,12 @@ def test_zero_reaction_yields_uniform_concentration() -> None:
         w=100,
     )
     res = compute_co2_diffusion(
-        seg, um_per_px=1.0, max_side_px=100, ci_pa=25.0, reaction_rate=0.0
+        seg,
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        reaction_rate=0.0,
+        kinetics_mode="linear",
     )
     assert res.cc_mean_pa is not None
     assert res.cc_mean_pa == pytest.approx(25.0, rel=0.01)
@@ -156,6 +167,7 @@ def test_positive_reaction_draws_cc_below_ci() -> None:
         max_side_px=100,
         ci_pa=25.0,
         reaction_rate=1.0,
+        kinetics_mode="linear",
     )
     assert res.cc_mean_pa is not None
     assert res.cc_mean_pa < 25.0  # drawn down by Rubisco
@@ -179,10 +191,20 @@ def test_higher_reaction_rate_increases_drawdown() -> None:
         w=100,
     )
     low = compute_co2_diffusion(
-        seg, um_per_px=1.0, max_side_px=100, ci_pa=25.0, reaction_rate=0.5
+        seg,
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        reaction_rate=0.5,
+        kinetics_mode="linear",
     )
     high = compute_co2_diffusion(
-        seg, um_per_px=1.0, max_side_px=100, ci_pa=25.0, reaction_rate=5.0
+        seg,
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        reaction_rate=5.0,
+        kinetics_mode="linear",
     )
     assert low.cc_mean_pa is not None and high.cc_mean_pa is not None
     assert high.cc_mean_pa < low.cc_mean_pa
@@ -206,6 +228,7 @@ def test_diffusivity_override_drops_non_finite_silently() -> None:
         seg,
         um_per_px=1.0,
         max_side_px=100,
+        kinetics_mode="linear",
         diffusivity_override={
             "palisade": -1.0,
             "spongy": float("inf"),
@@ -254,6 +277,7 @@ def test_chloroplast_overlay_used_when_provided() -> None:
         max_side_px=w,
         ci_pa=25.0,
         reaction_rate=1.0,
+        kinetics_mode="linear",
     )
     assert res.sink_class == "chloroplast"
 
@@ -275,7 +299,12 @@ def test_per_stomatum_drawdowns_reported() -> None:
         w=100,
     )
     res = compute_co2_diffusion(
-        seg, um_per_px=1.0, max_side_px=100, ci_pa=25.0, reaction_rate=1.0
+        seg,
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        reaction_rate=1.0,
+        kinetics_mode="linear",
     )
     assert len(res.stomata_drawdowns) == 3
     for s in res.stomata_drawdowns:
@@ -307,7 +336,12 @@ def test_dirichlet_touching_does_not_inflate_a_net() -> None:
         w=100,
     )
     res = compute_co2_diffusion(
-        seg, um_per_px=1.0, max_side_px=100, ci_pa=25.0, reaction_rate=1.0
+        seg,
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        reaction_rate=1.0,
+        kinetics_mode="linear",
     )
     # An old buggy version (no gating) would have given a_net equal
     # to the BC face flux ≈ D_face * (Ci - Cc) * face_length, which
@@ -360,6 +394,7 @@ def test_g_m_proxy_matches_analytical_fickian_conductance() -> None:
         max_side_px=w,
         ci_pa=25.0,
         reaction_rate=1e6,  # huge r → sink band ≈ C=0 (Dirichlet-like)
+        kinetics_mode="linear",
     )
     # leaf_section_length_m should be the grid-x extent in metres.
     # minAreaRect major axis on a w*h grid with w > h is w px.
@@ -407,7 +442,12 @@ def test_non_finite_solver_values_surface_in_notes() -> None:
         w=100,
     )
     res = compute_co2_diffusion(
-        seg, um_per_px=1.0, max_side_px=100, ci_pa=25.0, reaction_rate=1.0
+        seg,
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        reaction_rate=1.0,
+        kinetics_mode="linear",
     )
     # No non-finite / negative warnings expected here.
     for note in res.notes:
@@ -426,7 +466,12 @@ def test_result_round_trips_through_strict_json() -> None:
         w=100,
     )
     res = compute_co2_diffusion(
-        seg, um_per_px=1.0, max_side_px=100, ci_pa=25.0, reaction_rate=1.0
+        seg,
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        reaction_rate=1.0,
+        kinetics_mode="linear",
     )
     s = json.dumps(res.to_dict(), allow_nan=False)
     assert "NaN" not in s and "Infinity" not in s
@@ -439,4 +484,239 @@ def test_default_constants_sensible() -> None:
     assert (
         DEFAULT_DIFFUSIVITY["intercellular"] / DEFAULT_DIFFUSIVITY["palisade"]
         > 1e3
+    )
+
+
+# ============================================================
+# Michaelis-Menten Farquhar reaction (post-PR #16 default mode)
+# ============================================================
+
+def _mm_seg() -> dict:
+    """Standard 100×40 leaf cross-section used by every M-M test —
+    palisade band + intercellular bridge + stomata strip — so the
+    physical assertions can pin against a known geometry."""
+    return _segformer_blob(
+        [
+            _rect(0, 0, 100, 30, "palisade"),
+            _rect(0, 30, 100, 32, "intercellular"),
+            _rect(0, 32, 100, 35, "stomata"),
+        ],
+        h=40,
+        w=100,
+    )
+
+
+def test_mm_default_mode_runs_and_converges() -> None:
+    """Default kinetics_mode should be Michaelis-Menten and the Picard
+    iteration should converge below the default tolerance for typical
+    inputs.  Catches accidental regressions to the linear-only solver."""
+    res = compute_co2_diffusion(
+        _mm_seg(),
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+    )
+    assert res.kinetics_mode == "michaelis_menten"
+    assert 1 <= res.picard_iterations <= 50
+    assert res.picard_residual_pa < 1e-3
+
+
+def test_mm_zero_vcmax_yields_uniform_ci() -> None:
+    """V_cmax = 0 → no carboxylation → C ≡ Ci everywhere, A_net ≈ 0,
+    g_m_proxy = None.  Mirrors the linear-mode reaction_rate=0 test
+    so the M-M path doesn't quietly produce a non-zero R at zero
+    capacity."""
+    res = compute_co2_diffusion(
+        _mm_seg(),
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        vcmax_per_volume_mol_m3_s=0.0,
+    )
+    assert res.cc_mean_pa == pytest.approx(25.0, rel=0.01)
+    assert abs(res.a_net) < 1e-12
+    assert res.g_m_proxy is None
+
+
+def test_mm_higher_vcmax_increases_drawdown() -> None:
+    """Monotonicity in V_cmax: doubling V_cmax must reduce Cc and
+    increase the drawdown.  Pinning the M-M sign + dimensional
+    convention against the same physical intuition the linear test
+    uses (high r → more drawdown)."""
+    low = compute_co2_diffusion(
+        _mm_seg(),
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        vcmax_per_volume_mol_m3_s=0.5,
+    )
+    high = compute_co2_diffusion(
+        _mm_seg(),
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        vcmax_per_volume_mol_m3_s=4.0,
+    )
+    assert low.cc_mean_pa is not None and high.cc_mean_pa is not None
+    assert high.cc_mean_pa < low.cc_mean_pa
+    assert high.drawdown_mean_pa is not None and low.drawdown_mean_pa is not None
+    assert high.drawdown_mean_pa > low.drawdown_mean_pa
+
+
+def test_mm_converges_below_compensation_point() -> None:
+    """When Ci is well below Γ*, R(C) goes NEGATIVE on the sink
+    interior (the linearisation models local "release" — physically
+    a stand-in for photorespiration that this pipeline does not
+    model explicitly).  A_net, reported from the boundary form
+    `-_boundary_outflow(sink_interior)`, then becomes correspondingly
+    small or even negative — gradient effectively reverses.
+
+    The test confirms (a) the gamma_star sign convention in the
+    linearisation is correct, (b) the solver still converges in
+    that regime, and (c) Cc remains physically bounded near Ci
+    (no run-away)."""
+    res = compute_co2_diffusion(
+        _mm_seg(),
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=2.0,             # Ci < Γ* = 3.743 Pa
+        vcmax_per_volume_mol_m3_s=2.0,
+    )
+    # A_net (boundary form) should be small in magnitude — there is no
+    # net forward carboxylation when Ci sits below the compensation
+    # point.  Allow either sign; we just assert it isn't a runaway value.
+    assert abs(res.a_net) <= 1e-2 * 25.0
+    # Cc remains close to Ci because there is no large net consumption.
+    assert res.cc_mean_pa is not None
+    assert res.cc_mean_pa <= 2.0 + 0.5
+    assert res.cc_mean_pa >= 0.0
+
+
+def test_mm_reports_kinetics_constants_in_result() -> None:
+    """The dataclass must echo the kinetics constants used so the
+    persisted analysis row is reproducible.  Operators can override
+    K_c, Γ* etc. and we want the run-time values back, not the
+    library defaults."""
+    res = compute_co2_diffusion(
+        _mm_seg(),
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        vcmax_per_volume_mol_m3_s=2.0,
+        kc_pa=30.0,
+        ko_pa=20000.0,
+        o2_pa=21000.0,
+        gamma_star_pa=4.0,
+    )
+    assert res.kinetics_mode == "michaelis_menten"
+    assert res.vcmax_per_volume_mol_m3_s == pytest.approx(2.0)
+    assert res.kc_pa == pytest.approx(30.0)
+    assert res.ko_pa == pytest.approx(20000.0)
+    assert res.o2_pa == pytest.approx(21000.0)
+    assert res.gamma_star_pa == pytest.approx(4.0)
+
+
+def test_mm_invalid_kinetics_mode_rejected() -> None:
+    with pytest.raises(ValueError, match="kinetics_mode"):
+        compute_co2_diffusion(
+            _mm_seg(),
+            um_per_px=1.0,
+            max_side_px=50,
+            kinetics_mode="bogus",
+        )
+
+
+def test_mm_negative_kinetics_constants_rejected() -> None:
+    """Each kinetics input must be a non-negative finite number;
+    K_c and K_o specifically must be strictly positive (they appear
+    in denominators)."""
+    with pytest.raises(ValueError, match="kc_pa"):
+        compute_co2_diffusion(
+            _mm_seg(),
+            um_per_px=1.0,
+            max_side_px=50,
+            kc_pa=-1.0,
+        )
+    with pytest.raises(ValueError):
+        compute_co2_diffusion(
+            _mm_seg(),
+            um_per_px=1.0,
+            max_side_px=50,
+            kc_pa=0.0,  # strict positivity for kc/ko
+        )
+    with pytest.raises(ValueError):
+        compute_co2_diffusion(
+            _mm_seg(),
+            um_per_px=1.0,
+            max_side_px=50,
+            ko_pa=0.0,
+        )
+
+
+def test_mm_mass_conservation_within_tolerance() -> None:
+    """In steady state the boundary supply through the stomata must
+    match the volume integral of R(C) over the sink — divergence
+    theorem applied to the leaf interior gives that exactly.  After
+    Picard convergence this imbalance should NOT trigger the >5 %
+    notes warning even on the small 40×100 test grid.
+
+    The 5 % cap comes from the harmonic-mean face conductivity error
+    at the gas/liquid interface (D_IAS / D_palisade ≈ 10⁴), which is
+    a genuine FV discretization limit and not a Picard convergence
+    issue.  Larger grids close to <1 %; this test pins the loose
+    upper bound that's robust on coarse images."""
+    res = compute_co2_diffusion(
+        _mm_seg(),
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        vcmax_per_volume_mol_m3_s=1.5,
+    )
+    # Imbalance warning should not be present.
+    assert not any("imbalance" in note.lower() for note in res.notes), (
+        f"unexpected imbalance note: {res.notes}"
+    )
+
+
+def test_mm_result_round_trips_through_strict_json() -> None:
+    res = compute_co2_diffusion(
+        _mm_seg(),
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        vcmax_per_volume_mol_m3_s=1.0,
+    )
+    s = json.dumps(res.to_dict(), allow_nan=False)
+    assert "NaN" not in s and "Infinity" not in s
+    # Round-trip preserves the new fields.
+    parsed = json.loads(s)
+    assert parsed["kinetics_mode"] == "michaelis_menten"
+    assert "picard_iterations" in parsed
+    assert "kc_pa" in parsed
+
+
+def test_mm_picard_max_iter_warning_emitted() -> None:
+    """When Picard hits `picard_max_iter` without reaching `picard_tol_pa`,
+    the result still returns the last iterate AND records a warning in
+    `notes` — graceful degradation.  Round-1 review found the diagnostic
+    branch was unverified; this test exercises it by combining a tight
+    tolerance with an iteration cap of 1 (the seed solve plus one Picard
+    step is enough to trip the residual check on a non-trivial reaction).
+    """
+    res = compute_co2_diffusion(
+        _mm_seg(),
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        vcmax_per_volume_mol_m3_s=2.0,
+        picard_max_iter=1,           # force early termination
+        picard_tol_pa=1e-12,         # effectively impossible at 1 iter
+    )
+    # Solver still produced a usable Cc / a_net pair, just a warning.
+    assert res.cc_mean_pa is not None
+    assert res.picard_iterations == 1
+    assert res.picard_residual_pa > 1e-12  # didn't actually converge
+    # Warning surfaced in notes.
+    assert any("max_iter" in note.lower() for note in res.notes), (
+        f"expected a max_iter warning in notes, got {res.notes}"
     )

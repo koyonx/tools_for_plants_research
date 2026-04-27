@@ -42,13 +42,20 @@ t(x) \;=\; \bigl(y_{\text{bottom}}(x) - y_{\text{top}}(x) + 1\bigr) \cdot \mu,
 \qquad \mu = \frac{L_\text{ref}\,[\mu\mathrm{m}]}{\ell_\text{bar}\,[\mathrm{px}]}
 $$
 
-葉断面面積は
+葉断面面積は **葉マスクの全画素の総和** に画素面積 $\mu^{2}$ を
+かけて算出します（`pipeline/measure.py:81`）:
 
 $$
-A_\text{leaf} \;=\; \mu^2 \sum_x t(x)/\mu \;=\; \mu \cdot \sum_x t(x).
+A_\text{leaf} \;=\; \mu^{2} \sum_{(x,y)\,\in\,M_\text{leaf}} 1
+\;=\; \mu^{2} \cdot N_\text{px}^\text{leaf}
 $$
 
-葉厚分布の代表値は列ごとの $t(x)$ から取ります。
+ここで $N_\text{px}^\text{leaf}$ は葉マスクのピクセル数。
+内部空隙やエッジの不規則さも含めた **真の 2D 断面面積** を出すので、
+列方向の thickness profile $\sum_x t(x)$ を使う近似（境界形状が
+凸でないと過大評価する）より正確です。
+
+葉厚分布の代表値は列ごとの $t(x)$ から取ります:
 
 $$
 \bar t = \frac{1}{n_x}\sum_x t(x),\quad

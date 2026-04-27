@@ -26,11 +26,17 @@ $$
 \end{cases}
 $$
 
-$\tau$ マッチング順序は
+$\tau$ マッチング順序 (`pipeline/literature_ranges.py::find_range`):
 
-1. 完全一致 (`C3` / `C4` / `C3-C4` / `CAM`)
-2. pooled フォールバック (`any`)
-3. None → unknown
+1. 完全一致 (`C3` / `C4` / `C3-C4` / `CAM`) のレンジを優先
+2. なければ pooled `any` のレンジにフォールバック
+3. それも無ければ `None` を返却 → 呼び出し元 (`api/validation.py`) で
+   `status = "unknown"` として finding に載る
+
+`photosynthesis_type == "unknown"` (PR #8 の enum 値) は
+`api/validation.py` 側で `None` に変換してから渡しているので、
+上記 1 のステップは無マッチで通り抜けて 2 → 3 のフォールバックに
+落ちる挙動になっています。
 
 ## 文献ソース（抜粋）
 
@@ -41,6 +47,7 @@ $\tau$ マッチング順序は
 | $f_\text{ias}$ | C3 | 0.15 – 0.45 | Terashima *et al.* 2011 |
 | $f_\text{ias}$ | C4 | 0.05 – 0.20 | Dengler & Nelson 1999 |
 | $T_\text{cw}$ | C3 | 0.1 – 0.5 µm | Evans *et al.* 2009 |
+| $T_\text{cw}$ | C4 | 0.15 – 0.6 µm | Evans *et al.* 2009 |
 | $g_m$ | C3 | 0.05 – 0.60 | Flexas *et al.* 2008 |
 | $g_m$ | C4 | 0.03 – 0.40 | Flexas *et al.* 2008 |
 | $V_\text{cmax}$ | C3 | 30 – 200 µmol m⁻² s⁻¹ | Wullschleger 1993 |

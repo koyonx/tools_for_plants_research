@@ -95,17 +95,27 @@ Content-Type: application/json
 
 ```jsonc
 {
-  "metric_rows": [
+  "metrics": [
     {
       "metric": { "key": "co2_s_mes_s", "label": "S_mes/S", "unit": "-" },
-      "group_a": { "n": 12, "mean": 14.8, "median": 15.0, "sd": 2.1 },
-      "group_b": { "n":  9, "mean":  5.2, "median":  5.0, "sd": 1.3 },
-      "tests":   { "welch_p_value": 1.5e-6, "mann_whitney_p_value": 2.3e-5 },
-      "effect_size": { "hedges_g": 4.95, "hedges_g_ci_low": 3.2, "hedges_g_ci_high": 6.7 }
+      "group_a": { "n": 12, "mean": 14.8, "median": 15.0, "sd": 2.1,
+                   "q25": 13.5, "q75": 16.5, "min": 10.0, "max": 20.0,
+                   "image_ids": [...], "values": [...] },
+      "group_b": { "n":  9, "mean":  5.2, "median":  5.0, "sd": 1.3,
+                   "q25": 4.0, "q75": 6.0, "min": 3.0, "max": 7.5,
+                   "image_ids": [...], "values": [...] },
+      "tests":   { "welch_t_statistic": 8.2, "welch_p_value": 1.5e-6,
+                   "mann_whitney_u": 4.0, "mann_whitney_p_value": 2.3e-5 },
+      "effect_size": { "cohens_d": 5.1, "hedges_g": 4.95,
+                       "hedges_g_ci_low": 3.2, "hedges_g_ci_high": 6.7 }
     }
+    // ...
   ]
 }
 ```
+
+> トップレベルキーは **`metrics`** (リクエストの `metrics` リストと同名)。
+> 古いコメントで `metric_rows` と書かれている場合は誤記なので注意。
 
 ## ダッシュボード UI
 

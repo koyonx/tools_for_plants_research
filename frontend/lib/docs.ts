@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
 
@@ -19,9 +19,19 @@ export type LoadedDoc = {
 
 // Walk DOCS_ROOT and return every .md file.  Server-side only — this
 // function touches the filesystem, so callers must be server components
-// or route handlers.
+// or route handlers.  Resilient to two failure modes the round-3 audit
+// flagged:
+//   - DOCS_ROOT does not exist (returns empty list rather than letting
+//     the layout-level server component crash with ENOENT).
+//   - A .md entry resolves to a broken symlink (skipped silently;
+//     `getDocsTree` keeps rendering the docs that ARE readable).
 async function walk(dir: string, base: string[] = []): Promise<string[][]> {
-  const entries = await fs.readdir(dir, { withFileTypes: true });
+  let entries: Dirent[];
+  try {
+    entries = (await fs.readdir(dir, { withFileTypes: true })) as Dirent[];
+  } catch {
+    return [];
+  }
   const out: string[][] = [];
   for (const entry of entries) {
     const next = [...base, entry.name];
@@ -46,13 +56,21 @@ function parseMetaFromFrontmatter(slug: string[], data: Record<string, unknown>)
 
 export async function listDocs(): Promise<DocMeta[]> {
   const slugs = await walk(DOCS_ROOT);
-  const metas = await Promise.all(
-    slugs.map(async (slug) => {
-      const raw = await fs.readFile(path.join(DOCS_ROOT, ...slugFile(slug)), "utf8");
-      const { data } = matter(raw);
-      return parseMetaFromFrontmatter(slug, data);
+  // Resilient per-file read: a broken symlink or a permission error on
+  // a single .md file no longer takes down the whole sidebar — the
+  // unreadable file is dropped from the index instead.
+  const metaResults = await Promise.all(
+    slugs.map(async (slug): Promise<DocMeta | null> => {
+      try {
+        const raw = await fs.readFile(path.join(DOCS_ROOT, ...slugFile(slug)), "utf8");
+        const { data } = matter(raw);
+        return parseMetaFromFrontmatter(slug, data);
+      } catch {
+        return null;
+      }
     }),
   );
+  const metas = metaResults.filter((m): m is DocMeta => m !== null);
   metas.sort((a, b) => {
     if (a.order !== b.order) return a.order - b.order;
     return a.title.localeCompare(b.title);
