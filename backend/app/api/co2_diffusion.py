@@ -196,8 +196,8 @@ async def _run_co2_diffusion_bg(
         from app.pipeline.co2_diffusion import (
             DEFAULT_GAMMA_STAR_PA,
             DEFAULT_KC_PA,
-            DEFAULT_KO_PA,
             DEFAULT_KINETICS_MODE,
+            DEFAULT_KO_PA,
             DEFAULT_O2_PA,
             DEFAULT_PICARD_MAX_ITER,
             DEFAULT_PICARD_TOL_PA,
