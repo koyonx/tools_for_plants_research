@@ -24,7 +24,8 @@ sequenceDiagram
     BE-->>FE: analysis row (done)
     note over U,FE: 以下、必要なパイプラインを順に起動
     U->>FE: SegFormer / Cellpose / Darcy / CO2 拡散
-    FE->>BE: POST /images/{id}/<kind>
+    FE->>BE: POST /images/{id}/analyze/{kind}
+    note right of FE: kind = cellpose / segformer /<br/>water-path / darcy /<br/>co2-morphometrics / co2-diffusion
     BE->>PIPE: バックグラウンド実行
     PIPE-->>SB: analyses row (done)
     FE->>BE: ValidationBadge 再 fetch (router.refresh)

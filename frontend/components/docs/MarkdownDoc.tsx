@@ -204,9 +204,14 @@ const components: Components = {
   // Auto-upgrade image-syntax video links (`![caption](demo.mp4)`) to
   // a real <video> element.  The alt text falls back as the filename
   // for accessibility when the browser can't play the source.
+  // Empty / non-string `src` returns null so the browser does not
+  // emit a self-fetch for `<img src="">` (the spec's behaviour: an
+  // empty src is treated as a relative URL pointing at the document
+  // itself).  Round-3 docs runtime audit caught this regression.
   img: ({ src, alt, title }) => {
     const s = typeof src === "string" ? src : "";
-    if (s && VIDEO_EXT_RE.test(s)) {
+    if (!s) return null;
+    if (VIDEO_EXT_RE.test(s)) {
       return (
         <figure className="my-4">
           {/* biome-ignore lint/a11y/useMediaCaption: docs can embed silent demo loops with no transcript */}
@@ -295,6 +300,13 @@ const components: Components = {
 
   a: ({ href, children, ...rest }) => {
     const s = typeof href === "string" ? href : "";
+    // Empty href would render `<a href="">` which the HTML spec
+    // resolves as a same-document link — clicking it reloads the
+    // current page.  Fall back to plain text in that case so the
+    // content still renders without surprising the user.
+    if (!s) {
+      return <span>{children}</span>;
+    }
     const isExternal = /^https?:\/\//i.test(s);
     return (
       <a
