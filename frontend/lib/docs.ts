@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
 
@@ -26,9 +26,9 @@ export type LoadedDoc = {
 //   - A .md entry resolves to a broken symlink (skipped silently;
 //     `getDocsTree` keeps rendering the docs that ARE readable).
 async function walk(dir: string, base: string[] = []): Promise<string[][]> {
-  let entries: Awaited<ReturnType<typeof fs.readdir>>;
+  let entries: Dirent[];
   try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
+    entries = (await fs.readdir(dir, { withFileTypes: true })) as Dirent[];
   } catch {
     return [];
   }
