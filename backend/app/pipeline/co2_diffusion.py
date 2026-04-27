@@ -562,9 +562,11 @@ def compute_co2_diffusion(
             mat_lil.data[i] = [1.0]
             rhs_local[i] = ci_pa
         try:
-            return spsolve(mat_lil.tocsc(), rhs_local)
+            solved = spsolve(mat_lil.tocsc(), rhs_local)
         except Exception as exc:
             raise RuntimeError(f"CO2 diffusion solve failed: {exc}") from exc
+        # spsolve returns Any per scipy stubs; cast to a typed ndarray.
+        return np.asarray(solved, dtype=np.float64)
 
     picard_iterations = 0
     picard_residual_pa = 0.0
