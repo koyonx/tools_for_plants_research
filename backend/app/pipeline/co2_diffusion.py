@@ -127,9 +127,17 @@ DEFAULT_GAMMA_STAR_PA = 3.743    # CO2 compensation point in absence of Rd
 # downward for shade leaves.
 DEFAULT_VCMAX_PER_VOLUME = 1.0
 
-# Picard iteration controls for the M-M solve.  Convergence is
-# guaranteed by the monotonicity of R(C) on C ≥ Γ*; in practice
-# the iteration converges in ~5–15 sweeps to the default tolerance.
+# Picard iteration controls for the M-M solve.  R(C) is monotone
+# increasing on C ≥ Γ*, which makes the iteration well-behaved on
+# physically-plausible inputs but does NOT prove contractivity in
+# general (the iterate composes the elliptic inverse with the local
+# linearisation; a rigorous bound depends on V_cmax_vol and the
+# diffusivity ratio).  Empirically the iteration converges in
+# ~5–15 sweeps to the default tolerance for the V_cmax / D_field
+# parameter ranges we care about; the `picard_iterations` /
+# `picard_residual_pa` diagnostics + the max-iter warning catch the
+# case where the iteration stalls without forcing the operator to
+# trust an opaque "guaranteed convergence" claim.
 DEFAULT_PICARD_MAX_ITER = 50
 DEFAULT_PICARD_TOL_PA = 1e-4
 
@@ -538,24 +546,33 @@ def compute_co2_diffusion(
 
     def _apply_reaction_and_solve(b_diag: np.ndarray, a_const: np.ndarray) -> np.ndarray:
         """Take the constant Laplacian and add the linearised reaction
-        ``-b · C = a`` (per voxel, scaled by dx²) to it, then pin
-        Dirichlet rows and solve.  ``b_diag`` and ``a_const`` are
-        sized over the sink cells; the rest of the leaf has zero
-        reaction contribution.
+        to assemble  ``(L − b · dx² · diag) · C = a · dx²``  per sink
+        voxel, pin Dirichlet rows, and solve.  ``b_diag`` and
+        ``a_const`` are sized over the sink cells; the rest of the
+        leaf has zero reaction contribution.
+
+        Derivation: the steady-state PDE is
+            ∇·(D∇C) − R(C) = 0
+        with the linearised reaction R(C) ≈ a + b · C (sink-only).
+        Rearranging:
+            ∇·(D∇C) − b · C = a
+        Discrete form on the FV stencil scaled by dx²:
+            (L − b · dx² · diag) · C = a · dx²
+        which is what the assembly below produces.
         """
         mat_lil = laplacian.tolil(copy=True)
         if sink_idx.size > 0:
             for k, i in enumerate(sink_idx):
-                # Laplacian diagonal entry at [i, i] is already present
-                # from the face-flux assembly; add the reaction
-                # contribution -b * dx² (b already includes the sign
-                # convention so that R increases C consumption).
+                # Subtract b · dx² from the Laplacian diagonal at sink
+                # cells.  This realises the LHS contribution of the
+                # `−b · C` term in the linearised PDE.
                 mat_lil[i, i] += -float(b_diag[k]) * dx_sq
         rhs_local = np.zeros(n, dtype=np.float64)
         if sink_idx.size > 0:
-            # Constant part of the reaction goes to the RHS with the
-            # opposite sign (we moved -bC and +a to the LHS; +a goes
-            # to the RHS as -a after rearrangement).
+            # Constant part of the reaction lives on the RHS with the
+            # SAME sign as in the rearranged PDE (`a · dx²`), i.e. we
+            # are NOT flipping the sign — the rearranged equation
+            # already has `+a` on the RHS.
             rhs_local[sink_idx] += float(dx_sq) * a_const
         for i in dirichlet_idx:
             mat_lil.rows[i] = [i]

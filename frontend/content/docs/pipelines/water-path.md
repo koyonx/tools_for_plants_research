@@ -36,22 +36,22 @@ $$
 ## 抵抗 $w$ の組織別割当
 
 `DEFAULT_RESISTANCE` (`pipeline/water_path.py::DEFAULT_RESISTANCE`)
-の代表値:
+の実装値:
 
-| クラス | 抵抗 $w$ | 速度 $F$ | 物性 |
+| クラス | 抵抗 $w$ | 速度 $F = 1/w$ | 物性 |
 |---|---|---|---|
-| `xylem_vessel` | 0.1 | 10 | 導管、source 後の最速経路 |
-| `xylem` | 0.2 | 5 | 木部全体 |
-| `intercellular` | 0.5 | 2 | 細胞間隙 |
-| `palisade` | 1.0 | 1 | 柵状葉肉、基準 |
-| `spongy` | 1.0 | 1 | 海綿状葉肉 |
-| `bundle_sheath` | 2.0 | 0.5 | 維管束鞘 |
-| `phloem` | 5.0 | 0.2 | 篩部、糖専門 |
-| `stomata` | 1.0 | 1 | sink 近傍、終点判定用 |
+| `xylem_vessel` | 0.05 | 20.0 | 導管、source 後の最速経路 |
+| `xylem` | 0.1 | 10.0 | 木部全体 |
+| `stomata` | 0.2 | 5.0 | sink 近傍、終点判定用 |
+| `intercellular` | 0.6 | 1.67 | 細胞間隙 |
+| `palisade` | 1.0 | 1.0 | 柵状葉肉、基準 |
+| `spongy` | 1.2 | 0.83 | 海綿状葉肉、palisade よりやや疎 |
+| `bundle_sheath` | 1.5 | 0.67 | 維管束鞘 |
+| `phloem` | 4.0 | 0.25 | 篩部、糖専門 |
+| `other` | 5.0 | 0.2 | 未分類 |
 | `upper_epidermis` | 8.0 | 0.125 | 表皮、ほぼ壁 |
 | `lower_epidermis` | 8.0 | 0.125 | 同上 |
-| `other` | 3.0 | 0.33 | 既定 |
-| 背景 | $\infty$ (`BACKGROUND_COST = 100.0`) | $\approx 0$ | 葉外 |
+| 背景 | `BACKGROUND_COST = 100.0` | $\approx 0$ | 葉外、実質通過不可 |
 
 operator は API リクエストで上書き可能。
 

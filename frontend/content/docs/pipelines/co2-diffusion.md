@@ -89,8 +89,13 @@ $$
 $$
 
 ここで $L$ は調和平均面係数で組んだ Laplacian 行列。
-$R(C)$ は $C \ge \Gamma^*$ で単調増加なので Picard は確実に
-収束します（既定で 5〜15 反復、`picard_tol_pa = 10^{-4}` Pa）。
+$R(C)$ が $C \ge \Gamma^*$ で単調増加であることが反復写像の挙動を
+比較的素直にします（厳密な contractivity は楕円逆作用素 + 局所
+線形化の合成に依存し、$V_\text{cmax,vol}$ や拡散係数比に依存する
+評価が必要なため、本実装はそこまで証明していません）。実際には
+代表的な C3/C4 入力で **5〜15 反復** で `picard_tol_pa = 10^{-4}` Pa
+に収束、上限 `picard_max_iter = 50` に達した場合は `notes` に警告を
+残してそのまま結果を返す graceful 動作にしています。
 
 ### 線形モード（後方互換）
 
@@ -125,16 +130,20 @@ flowchart LR
 
 ## A_net と g_m proxy
 
-定常状態では葉肉内反応の体積積分 = 気孔境界からの供給フラックス
-（質量保存則）なので、二通りの計算経路がどちらも同じ値を与えます。
-本実装は **収束後の濃度場で R(C) を再計算した体積積分** を採用します
-（離散化誤差に対して直接的）。
+定常状態では発散定理から **3 つの量が一致** します:
 
 $$
-A_\text{net} \;=\; \int_{\Omega_\text{sink}} \max(R(C),\,0)\,d\Omega
-\quad
-\bigl[\mathrm{mol\,s^{-1}\,m^{-1}}_\text{depth}\bigr]
+\underbrace{\int_{\partial \Omega_\text{stomata}} D\,\nabla C \cdot \mathbf{n}\, dl}_{\text{stomata\_supply}}
+\;=\; \underbrace{\int_{\partial \Omega_\text{sink}} D\,\nabla C \cdot \mathbf{n}\, dl}_{a\_net}
+\;=\; \int_{\Omega_\text{sink}} R(C)\,d\Omega
 $$
+
+実装はこのうち **sink 境界面の符号付き法線フラックス** を A_net として
+報告 (`a_net = -_boundary_outflow(sink_interior)`、`pipeline/co2_diffusion.py:718`)。
+M-M モードで $R(C)$ が局所的に負になる領域があっても、boundary flux
+形式は自動でその寄与を取り込むため、`A_net` は **正味の Rubisco
+カルボキシレーション速度** (mol s⁻¹ m⁻¹_depth) として一貫した
+意味を持ちます。
 
 Cc 平均は sink 領域内の濃度平均:
 
@@ -142,7 +151,7 @@ $$
 C_c \;=\; \langle C \rangle_{\Omega_\text{sink}}
 $$
 
-そして葉長で正規化することで標準的な mesophyll conductance の単位に:
+葉長で正規化することで標準的な mesophyll conductance の単位に:
 
 $$
 g_m^\text{proxy} \;=\; \frac{A_\text{net}}{L_\text{leaf}\,(C_i - C_c)}
@@ -152,9 +161,13 @@ $$
 
 $L_\text{leaf}$ は葉断面の minAreaRect 長軸（`leaf_section_length_m`）。
 
-質量保存則のクロスチェックも実施:
-`stomata_supply ≈ A_net + ∫R(C)dV` の不一致が 1% を超えると
-`notes` に警告を載せます (Picard 未収束 / 葉緑体マスク欠損の指標)。
+質量保存クロスチェック: 上の発散定理から
+$\text{stomata\_supply} = \int_{\Omega_\text{sink}} R(C)\,d\Omega$ が成り立つはず。
+実装は **5 % 以上の不一致** を `notes` に警告として記録します
+（Picard 未収束 / 葉緑体マスクが消費組織を覆っていない / 気液界面で
+の調和平均離散化誤差が大きい、などの兆候）。
+PR #19 で線形モードから引き継いだ「`A_net + ∫R` で比較する double-counting バグ」
+も同時に修正済み。
 
 ## 収束診断
 

@@ -684,3 +684,30 @@ def test_mm_result_round_trips_through_strict_json() -> None:
     assert parsed["kinetics_mode"] == "michaelis_menten"
     assert "picard_iterations" in parsed
     assert "kc_pa" in parsed
+
+
+def test_mm_picard_max_iter_warning_emitted() -> None:
+    """When Picard hits `picard_max_iter` without reaching `picard_tol_pa`,
+    the result still returns the last iterate AND records a warning in
+    `notes` — graceful degradation.  Round-1 review found the diagnostic
+    branch was unverified; this test exercises it by combining a tight
+    tolerance with an iteration cap of 1 (the seed solve plus one Picard
+    step is enough to trip the residual check on a non-trivial reaction).
+    """
+    res = compute_co2_diffusion(
+        _mm_seg(),
+        um_per_px=1.0,
+        max_side_px=100,
+        ci_pa=25.0,
+        vcmax_per_volume_mol_m3_s=2.0,
+        picard_max_iter=1,           # force early termination
+        picard_tol_pa=1e-12,         # effectively impossible at 1 iter
+    )
+    # Solver still produced a usable Cc / a_net pair, just a warning.
+    assert res.cc_mean_pa is not None
+    assert res.picard_iterations == 1
+    assert res.picard_residual_pa > 1e-12  # didn't actually converge
+    # Warning surfaced in notes.
+    assert any("max_iter" in note.lower() for note in res.notes), (
+        f"expected a max_iter warning in notes, got {res.notes}"
+    )
