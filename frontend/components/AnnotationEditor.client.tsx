@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { AnnotationRow } from "@/lib/supabase/types";
 import { TISSUE_CLASSES, TISSUE_CLASS_BY_KEY, type TissueClassKey } from "@/lib/tissue-classes";
@@ -85,6 +86,13 @@ export function AnnotationEditorInner({
   // convention in most annotation tools (e.g. Label Studio / CVAT).
   const [panMode, setPanMode] = useState(false);
 
+  // Edit-mode state for an existing annotation.  When `editingId` is set,
+  // the canvas hides the new-polygon UI and instead shows draggable
+  // vertex handles plus midpoint "+" markers for inserting a new point.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingPolygon, setEditingPolygon] = useState<number[][]>([]);
+  const [editingClass, setEditingClass] = useState<TissueClassKey>("palisade");
+
   // Responsive stage width
   useEffect(() => {
     if (!containerRef.current) return;
@@ -153,7 +161,10 @@ export function AnnotationEditorInner({
   const handleStageClick = (e: KonvaEventObject<MouseEvent>) => {
     // While panning we never want a spurious click to add a vertex.
     if (panMode) return;
-    // Ignore clicks on existing annotations (we use Line onClick for delete)
+    // Editing an existing annotation locks out new-polygon drawing — the
+    // user is dragging handles, not laying down fresh vertices.
+    if (editingId) return;
+    // Ignore clicks on existing annotations (we use Line onClick for edit)
     if (e.target !== e.target.getStage() && e.target.className !== "Image") {
       return;
     }
@@ -199,7 +210,7 @@ export function AnnotationEditorInner({
         setCurrentPolygon([]);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -208,11 +219,95 @@ export function AnnotationEditorInner({
   const deleteAnnotation = async (id: string) => {
     const { error: delErr } = await supabase.from("annotations").delete().eq("id", id);
     if (delErr) {
-      setError(delErr.message);
+      setError(errorMessage(delErr));
       return;
     }
     setAnnotations((prev) => prev.filter((a) => a.id !== id));
+    if (editingId === id) {
+      setEditingId(null);
+      setEditingPolygon([]);
+    }
   };
+
+  // ---- Edit-existing-annotation flow ----
+  const startEditing = (a: AnnotationRow) => {
+    if (a.owner_id !== currentUserId) return;
+    if (!isWellFormedPolygon(a.polygon)) return;
+    setError(null);
+    setCurrentPolygon([]); // cancel any in-progress drawing
+    setEditingId(a.id);
+    setEditingPolygon(a.polygon.map((p) => [p[0], p[1]]));
+    // Fall back to "other" if the row's class drifted out of the
+    // frontend's known taxonomy (e.g. an old annotation predating a
+    // class rename).  Casting blindly would let the editor save back
+    // a class the DB CHECK now rejects.
+    const known = TISSUE_CLASS_BY_KEY[a.class as TissueClassKey];
+    setEditingClass(known ? (a.class as TissueClassKey) : "other");
+  };
+
+  const cancelEditing = useCallback(() => {
+    setEditingId(null);
+    setEditingPolygon([]);
+  }, []);
+
+  const moveEditingVertex = useCallback(
+    (i: number, x: number, y: number) => {
+      const cx = Math.min(Math.max(x, 0), imageWidth);
+      const cy = Math.min(Math.max(y, 0), imageHeight);
+      setEditingPolygon((prev) => prev.map((p, j) => (j === i ? [cx, cy] : p)));
+    },
+    [imageWidth, imageHeight],
+  );
+
+  const deleteEditingVertex = useCallback((i: number) => {
+    setEditingPolygon((prev) => {
+      if (prev.length <= 3) return prev; // need ≥3 to remain a polygon
+      return prev.filter((_, j) => j !== i);
+    });
+  }, []);
+
+  const insertEditingVertex = useCallback((afterIndex: number, x: number, y: number) => {
+    setEditingPolygon((prev) => {
+      const out = [...prev];
+      out.splice(afterIndex + 1, 0, [x, y]);
+      return out;
+    });
+  }, []);
+
+  const saveEdits = useCallback(async () => {
+    if (!editingId) return;
+    if (editingPolygon.length < 3) {
+      setError("ポリゴンは 3 点以上必要です");
+      return;
+    }
+    setError(null);
+    setSaving(true);
+    try {
+      const { data, error: updErr } = await supabase
+        .from("annotations")
+        .update({ polygon: editingPolygon, class: editingClass })
+        .eq("id", editingId)
+        .select("*")
+        .single<AnnotationRow>();
+      if (updErr) throw updErr;
+      if (data) {
+        setAnnotations((prev) => prev.map((a) => (a.id === editingId ? data : a)));
+        setEditingId(null);
+        setEditingPolygon([]);
+      }
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [editingId, editingPolygon, editingClass, supabase]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deleteAnnotation closes over only supabase + setState; first-render reference is safe and capturing it as a dep would break memoisation.
+  const deleteEditingAnnotation = useCallback(async () => {
+    if (!editingId) return;
+    if (!window.confirm("このアノテーションを削除しますか？")) return;
+    await deleteAnnotation(editingId);
+  }, [editingId]);
 
   // Keyboard shortcuts scoped to the editor container (tabIndex={0}).
   // Attaching via React's onKeyDown / onKeyUp on the container avoids
@@ -220,7 +315,12 @@ export function AnnotationEditorInner({
   // scrolling the viewport) the way a global `window` listener would.
   const onContainerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement | null;
-    if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+    if (
+      target?.tagName === "INPUT" ||
+      target?.tagName === "TEXTAREA" ||
+      target?.tagName === "SELECT"
+    )
+      return;
     if (e.code === "Space") {
       e.preventDefault();
       setPanMode(true);
@@ -228,11 +328,15 @@ export function AnnotationEditorInner({
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      void savePolygon();
+      if (editingId) void saveEdits();
+      else void savePolygon();
     } else if (e.key === "Escape") {
-      cancelCurrent();
+      if (editingId) cancelEditing();
+      else cancelCurrent();
     } else if (e.key === "Backspace") {
-      undoLast();
+      // While editing we don't yank random vertices on Backspace — the
+      // canvas has explicit per-vertex delete via Shift+click on a handle.
+      if (!editingId) undoLast();
     }
   };
 
@@ -246,14 +350,17 @@ export function AnnotationEditorInner({
     const onWindowKeyUp = (e: KeyboardEvent) => {
       if (e.code === "Space") setPanMode(false);
     };
+    const onWindowBlur = () => setPanMode(false);
     window.addEventListener("keyup", onWindowKeyUp);
-    window.addEventListener("blur", () => setPanMode(false));
+    window.addEventListener("blur", onWindowBlur);
     return () => {
       window.removeEventListener("keyup", onWindowKeyUp);
+      window.removeEventListener("blur", onWindowBlur);
     };
   }, []);
 
   const currentClassColor = TISSUE_CLASS_BY_KEY[currentClass]?.color ?? "#888";
+  const editingClassColor = TISSUE_CLASS_BY_KEY[editingClass]?.color ?? "#888";
 
   return (
     <div className="space-y-4">
@@ -302,7 +409,7 @@ export function AnnotationEditorInner({
             width={stageWidth}
             height={STAGE_HEIGHT}
             ref={stageRef}
-            draggable={currentPolygon.length === 0 || panMode}
+            draggable={(!editingId && currentPolygon.length === 0) || panMode}
             onWheel={handleWheel}
             onClick={handleStageClick}
             onTap={handleStageClick}
@@ -318,31 +425,97 @@ export function AnnotationEditorInner({
                 // enforces the shape via CHECK but we still harden the
                 // renderer against bad data.
                 if (!isWellFormedPolygon(a.polygon)) return null;
+                // The annotation under edit is rendered separately (with
+                // handles) below — skip it here to avoid double draw.
+                if (a.id === editingId) return null;
                 const cls = TISSUE_CLASS_BY_KEY[a.class];
                 const color = cls?.color ?? "#888";
                 const isOwn = a.owner_id === currentUserId;
+                const dim = editingId !== null;
                 return (
                   <Line
                     key={a.id}
                     points={flattenPoints(a.polygon)}
                     closed
-                    fill={hexToRgba(color, 0.25)}
+                    fill={hexToRgba(color, dim ? 0.08 : 0.25)}
                     stroke={color}
                     strokeWidth={2}
                     strokeScaleEnabled={false}
+                    opacity={dim ? 0.4 : 1}
+                    listening={!dim}
                     onClick={() => {
-                      if (isOwn && window.confirm("このアノテーションを削除しますか？")) {
-                        void deleteAnnotation(a.id);
-                      }
+                      if (isOwn) startEditing(a);
                     }}
                     onTap={() => {
-                      if (isOwn && window.confirm("このアノテーションを削除しますか？")) {
-                        void deleteAnnotation(a.id);
-                      }
+                      if (isOwn) startEditing(a);
                     }}
                   />
                 );
               })}
+              {/* Polygon currently being EDITED: outline + per-vertex
+                  drag handles + midpoint "+" markers for inserts. */}
+              {editingId && editingPolygon.length > 0 && (
+                <>
+                  <Line
+                    points={flattenPoints(editingPolygon)}
+                    closed
+                    fill={hexToRgba(editingClassColor, 0.2)}
+                    stroke={editingClassColor}
+                    strokeWidth={2}
+                    strokeScaleEnabled={false}
+                    dash={[8, 4]}
+                    dashEnabled
+                    listening={false}
+                  />
+                  {/* Midpoint markers (insert a vertex on click) */}
+                  {editingPolygon.map((p, i) => {
+                    const next = editingPolygon[(i + 1) % editingPolygon.length];
+                    const mx = (p[0] + next[0]) / 2;
+                    const my = (p[1] + next[1]) / 2;
+                    return (
+                      <Circle
+                        key={`mid-${i}-${mx.toFixed(1)}-${my.toFixed(1)}`}
+                        x={mx}
+                        y={my}
+                        radius={VERTEX_RADIUS_PX_VIEW * 0.7}
+                        fill="#ffffff"
+                        stroke={editingClassColor}
+                        strokeWidth={1}
+                        strokeScaleEnabled={false}
+                        opacity={0.7}
+                        onClick={() => insertEditingVertex(i, mx, my)}
+                        onTap={() => insertEditingVertex(i, mx, my)}
+                      />
+                    );
+                  })}
+                  {/* Vertex handles: drag to move, Shift-click to delete.
+                      Coordinate-based key would re-mount the handle on
+                      every drag tick (which would kill the active drag);
+                      the slot index is the natural identity here. */}
+                  {editingPolygon.map((p, i) => (
+                    <Circle
+                      key={`vh-${i}-${editingId}`}
+                      x={p[0]}
+                      y={p[1]}
+                      radius={VERTEX_RADIUS_PX_VIEW * 1.2}
+                      fill="#ffffff"
+                      stroke={editingClassColor}
+                      strokeWidth={2}
+                      strokeScaleEnabled={false}
+                      draggable
+                      onDragMove={(e) => moveEditingVertex(i, e.target.x(), e.target.y())}
+                      // Shift+click deletes a vertex.  We deliberately do
+                      // NOT bind onTap to the same action — touch users
+                      // would lose vertices on every accidental tap that
+                      // didn't translate into a drag.  Touch-only delete
+                      // is exposed via the toolbar instead.
+                      onClick={(e) => {
+                        if (e.evt.shiftKey) deleteEditingVertex(i);
+                      }}
+                    />
+                  ))}
+                </>
+              )}
               {currentPolygon.length > 0 && (
                 <>
                   <Line
@@ -373,36 +546,82 @@ export function AnnotationEditorInner({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <button
-          type="button"
-          onClick={savePolygon}
-          disabled={saving || currentPolygon.length < 3}
-          className="rounded bg-neutral-900 px-3 py-1.5 font-medium text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
-        >
-          {saving ? "保存中…" : "確定して保存 (Enter)"}
-        </button>
-        <button
-          type="button"
-          onClick={undoLast}
-          disabled={currentPolygon.length === 0}
-          className="rounded border border-neutral-300 px-3 py-1.5 disabled:opacity-50 dark:border-neutral-700"
-        >
-          1点戻す (BS)
-        </button>
-        <button
-          type="button"
-          onClick={cancelCurrent}
-          disabled={currentPolygon.length === 0}
-          className="rounded border border-neutral-300 px-3 py-1.5 disabled:opacity-50 dark:border-neutral-700"
-        >
-          取消 (Esc)
-        </button>
-        <span className="text-xs text-neutral-500">
-          クリックで頂点追加、<kbd className="rounded border px-1">Space</kbd>
-          押しながらドラッグでパン、ホイールでズーム、既存ポリゴン（自分のもの）をクリックで削除
-        </span>
-      </div>
+      {editingId ? (
+        <div className="flex flex-wrap items-center gap-2 rounded border border-amber-300 bg-amber-50 p-2 text-sm dark:border-amber-700 dark:bg-amber-950/40">
+          <span className="text-xs font-medium text-amber-800 dark:text-amber-200">編集中</span>
+          <label className="flex items-center gap-1 text-xs">
+            クラス:
+            <select
+              value={editingClass}
+              onChange={(e) => setEditingClass(e.target.value as TissueClassKey)}
+              className="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs dark:border-neutral-700"
+            >
+              {TISSUE_CLASSES.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => void saveEdits()}
+            disabled={saving || editingPolygon.length < 3}
+            className="rounded bg-neutral-900 px-3 py-1.5 font-medium text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+          >
+            {saving ? "保存中…" : "変更を保存 (Enter)"}
+          </button>
+          <button
+            type="button"
+            onClick={cancelEditing}
+            className="rounded border border-neutral-300 px-3 py-1.5 dark:border-neutral-700"
+          >
+            取消 (Esc)
+          </button>
+          <button
+            type="button"
+            onClick={() => void deleteEditingAnnotation()}
+            className="rounded border border-red-300 px-3 py-1.5 text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40"
+          >
+            削除
+          </button>
+          <span className="text-xs text-neutral-600 dark:text-neutral-400">
+            ハンドルをドラッグで移動 / <kbd className="rounded border px-1">Shift</kbd>
+            +クリックで点削除 / 中点をクリックで点追加 ({editingPolygon.length} 点)
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <button
+            type="button"
+            onClick={savePolygon}
+            disabled={saving || currentPolygon.length < 3}
+            className="rounded bg-neutral-900 px-3 py-1.5 font-medium text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+          >
+            {saving ? "保存中…" : "確定して保存 (Enter)"}
+          </button>
+          <button
+            type="button"
+            onClick={undoLast}
+            disabled={currentPolygon.length === 0}
+            className="rounded border border-neutral-300 px-3 py-1.5 disabled:opacity-50 dark:border-neutral-700"
+          >
+            1点戻す (BS)
+          </button>
+          <button
+            type="button"
+            onClick={cancelCurrent}
+            disabled={currentPolygon.length === 0}
+            className="rounded border border-neutral-300 px-3 py-1.5 disabled:opacity-50 dark:border-neutral-700"
+          >
+            取消 (Esc)
+          </button>
+          <span className="text-xs text-neutral-500">
+            クリックで頂点追加、<kbd className="rounded border px-1">Space</kbd>
+            押しながらドラッグでパン、ホイールでズーム、既存ポリゴン（自分のもの）をクリックで編集
+          </span>
+        </div>
+      )}
 
       {error && (
         <p className="rounded bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
@@ -416,18 +635,29 @@ export function AnnotationEditorInner({
           {annotations.map((a) => {
             const cls = TISSUE_CLASS_BY_KEY[a.class];
             const ptCount = isWellFormedPolygon(a.polygon) ? a.polygon.length : "?";
+            const isOwn = a.owner_id === currentUserId;
+            const isEditing = a.id === editingId;
             return (
-              <li
-                key={a.id}
-                className="flex items-center gap-2 rounded border border-neutral-200 px-2 py-1 text-xs dark:border-neutral-800"
-              >
-                <span
-                  aria-hidden
-                  className="inline-block h-3 w-3 rounded-sm"
-                  style={{ backgroundColor: cls?.color ?? "#888" }}
-                />
-                <span>{cls?.label ?? a.class}</span>
-                <span className="ml-auto text-neutral-500">{ptCount} pts</span>
+              <li key={a.id}>
+                <button
+                  type="button"
+                  onClick={() => (isOwn ? startEditing(a) : undefined)}
+                  disabled={!isOwn}
+                  className={`flex w-full items-center gap-2 rounded border px-2 py-1 text-left text-xs transition-colors ${
+                    isEditing
+                      ? "border-amber-500 bg-amber-50 dark:border-amber-600 dark:bg-amber-950/40"
+                      : "border-neutral-200 dark:border-neutral-800"
+                  } ${isOwn ? "hover:bg-neutral-50 dark:hover:bg-neutral-900" : "cursor-not-allowed opacity-60"}`}
+                  title={isOwn ? "クリックで編集" : "他ユーザーのアノテーション"}
+                >
+                  <span
+                    aria-hidden
+                    className="inline-block h-3 w-3 shrink-0 rounded-sm"
+                    style={{ backgroundColor: cls?.color ?? "#888" }}
+                  />
+                  <span className="truncate">{cls?.label ?? a.class}</span>
+                  <span className="ml-auto text-neutral-500">{ptCount} pts</span>
+                </button>
               </li>
             );
           })}

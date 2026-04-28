@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, SegFormerResult } from "@/lib/supabase/types";
 import { TISSUE_CLASS_BY_KEY } from "@/lib/tissue-classes";
@@ -129,7 +130,7 @@ export function SegFormerPanel({ imageId, imageUrl, initial, umPerPx, canRun }: 
       });
       pollRefFn.current?.(body.analysis_id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setTriggering(false);
     }

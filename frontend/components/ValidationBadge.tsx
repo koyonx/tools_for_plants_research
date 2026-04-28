@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { ValidationReport } from "@/lib/supabase/types";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -56,7 +57,7 @@ export function ValidationBadge({ target, refreshKey }: Props) {
       const body = (await resp.json()) as { report: ValidationReport };
       setReport(body.report);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }

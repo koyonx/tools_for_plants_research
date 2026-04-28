@@ -1,6 +1,7 @@
 "use client";
 
 import { ValidationBadge } from "@/components/ValidationBadge";
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type {
   GasExchangePointRow,
@@ -87,7 +88,7 @@ export function GmFitPanel({ sessionId, points, canRun }: Props) {
       }
       await loadLatest();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setRunning(false);
     }

@@ -1,5 +1,6 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { SUPABASE_STORAGE_KEY } from "./storage-key";
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -13,6 +14,7 @@ export function createClient() {
   const cookieStore = cookies();
 
   return createServerClient(serverSupabaseUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    auth: { storageKey: SUPABASE_STORAGE_KEY },
     cookies: {
       getAll() {
         return cookieStore.getAll();

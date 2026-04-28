@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { Visibility } from "@/lib/supabase/types";
 import { useRouter } from "next/navigation";
@@ -27,7 +28,15 @@ function sanitiseFilename(name: string) {
   return name.replace(/[^\w.\-]+/g, "_").slice(0, 120);
 }
 
-export function Uploader() {
+type UploaderProps = {
+  // Where to send the user after a successful upload.  "detail" (default)
+  // jumps to the analysis page; "annotate" jumps straight to the
+  // polygon editor — used when the user came from the annotation flow
+  // and just wants to keep labelling.
+  afterUpload?: "detail" | "annotate";
+};
+
+export function Uploader({ afterUpload = "detail" }: UploaderProps = {}) {
   const router = useRouter();
   const supabase = createClient();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -99,9 +108,16 @@ export function Uploader() {
         throw insErr;
       }
 
-      router.push(`/dashboard/images/${imageId}`);
+      // The annotate page hard-blocks images without recorded
+      // dimensions, so if `readImageMeta` failed (corrupt JPEG, browser
+      // refused to decode, …) we silently fall back to the detail page
+      // instead of dropping the user on a "サイズ未取得" error screen.
+      const goToAnnotate = afterUpload === "annotate" && meta != null;
+      router.push(
+        goToAnnotate ? `/dashboard/images/${imageId}/annotate` : `/dashboard/images/${imageId}`,
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
       setUploading(false);
     }
   };

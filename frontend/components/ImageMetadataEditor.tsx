@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { ImageRow, PhotosynthesisType } from "@/lib/supabase/types";
 import { useState } from "react";
@@ -34,7 +35,7 @@ export function ImageMetadataEditor({ image, canEdit }: Props) {
       const { error: updErr } = await supabase.from("images").update(patch).eq("id", image.id);
       if (updErr) throw updErr;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setSavingField(null);
     }

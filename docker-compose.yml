@@ -60,6 +60,11 @@ services:
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
       SUPABASE_URL: ${SUPABASE_URL}
       WATCHPACK_POLLING: "true"
+      # Opt-in flag for the dev-only `/auth/dev-login` route.  Required in
+      # addition to NODE_ENV !== "production" so that a misconfigured
+      # staging deploy that forgets to set NODE_ENV does not silently
+      # expose the route.
+      ALLOW_DEV_LOGIN: "1"
     volumes:
       - ./frontend/app:/app/app
       - ./frontend/components:/app/components

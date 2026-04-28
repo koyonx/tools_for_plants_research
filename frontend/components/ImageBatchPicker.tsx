@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { ImageRow, PhotosynthesisType } from "@/lib/supabase/types";
 import Link from "next/link";
@@ -147,7 +148,7 @@ export function ImageBatchPicker({ initial, currentUserId }: Props) {
       const body = (await resp.json()) as { id: string };
       router.push(`/dashboard/batches/${body.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
       setKickoffBusy(false);
     }
   };

@@ -1,5 +1,8 @@
 "use client";
 
+import { SampleAsAnnotations } from "@/components/SampleAsAnnotations";
+import { Stat } from "@/components/Stat";
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, CellposeResult } from "@/lib/supabase/types";
 import { useRouter } from "next/navigation";
@@ -14,6 +17,10 @@ type Props = {
   initial: AnalysisRow | null;
   umPerPx: number | null;
   canRun: boolean;
+  // Logged-in user id; required to attribute the bulk-sampled annotation
+  // rows.  When null (anonymous viewer of a public image), the
+  // "アノテーションに追加" button is hidden.
+  currentUserId: string | null;
 };
 
 function isCellposeResult(r: AnalysisRow["result"]): r is CellposeResult {
@@ -22,7 +29,14 @@ function isCellposeResult(r: AnalysisRow["result"]): r is CellposeResult {
   );
 }
 
-export function CellposePanel({ imageId, imageUrl, initial, umPerPx, canRun }: Props) {
+export function CellposePanel({
+  imageId,
+  imageUrl,
+  initial,
+  umPerPx,
+  canRun,
+  currentUserId,
+}: Props) {
   // `createClient()` returns a fresh SupabaseClient on every call, so
   // memoise here — otherwise every re-render gives us a new reference,
   // poisoning the poll-effect's dependency array.
@@ -138,7 +152,7 @@ export function CellposePanel({ imageId, imageUrl, initial, umPerPx, canRun }: P
       });
       pollRefFn.current?.(body.analysis_id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setTriggering(false);
     }
@@ -185,22 +199,39 @@ export function CellposePanel({ imageId, imageUrl, initial, umPerPx, canRun }: P
 
       {result && (
         <div className="space-y-3">
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
-            <dt className="text-neutral-500">検出セル数</dt>
-            <dd className="font-mono">{result.cell_count}</dd>
-            <dt className="text-neutral-500">平均面積</dt>
-            <dd className="font-mono">
-              {areaScale
-                ? `${(result.mean_area_px * areaScale).toFixed(1)} µm²`
-                : `${result.mean_area_px.toFixed(0)} px²`}
-            </dd>
-            <dt className="text-neutral-500">中央面積</dt>
-            <dd className="font-mono">
-              {areaScale
-                ? `${(result.median_area_px * areaScale).toFixed(1)} µm²`
-                : `${result.median_area_px.toFixed(0)} px²`}
-            </dd>
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+            <Stat label="検出セル数" value={result.cell_count} />
+            <Stat
+              label="平均面積"
+              value={
+                areaScale
+                  ? `${(result.mean_area_px * areaScale).toFixed(1)} µm²`
+                  : `${result.mean_area_px.toFixed(0)} px²`
+              }
+            />
+            <Stat
+              label="中央面積"
+              value={
+                areaScale
+                  ? `${(result.median_area_px * areaScale).toFixed(1)} µm²`
+                  : `${result.median_area_px.toFixed(0)} px²`
+              }
+            />
           </dl>
+          {/* Sampling is gated on `canRun` so a viewer of someone else's
+              public image can't claim others' Cellpose results as their
+              own training labels.  RLS would still allow the insert
+              (annotations.owner_id = auth.uid()), but the UX intent is
+              "the owner curates their own dataset". */}
+          {canRun && currentUserId && (
+            <SampleAsAnnotations
+              imageId={imageId}
+              ownerId={currentUserId}
+              polygons={result.cells.map((c) => c.polygon)}
+              countHint={`${result.cell_count} 件`}
+              label="セルをアノテーションに追加"
+            />
+          )}
           <CellOverlay
             imageUrl={imageUrl}
             width={result.image_shape.width_px}

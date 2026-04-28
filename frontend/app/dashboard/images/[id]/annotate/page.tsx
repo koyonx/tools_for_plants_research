@@ -1,4 +1,5 @@
 import { AnnotationEditor } from "@/components/AnnotationEditor";
+import { AnnotationImageNav, type ImageNavRow } from "@/components/AnnotationImageNav";
 import { MaskDownloadButton } from "@/components/MaskDownloadButton";
 import { toPublicSupabaseUrl } from "@/lib/supabase/public-url";
 import { createClient } from "@/lib/supabase/server";
@@ -58,6 +59,26 @@ export default async function AnnotatePage({
     .eq("image_id", image.id)
     .order("created_at", { ascending: true });
 
+  // Fetch the user's own images alongside their annotation counts so the
+  // navigation strip can highlight which slides still need work.  We
+  // intentionally cap at 100 here — this is an interactive editor, not
+  // a bulk-management screen, and any larger working set should use the
+  // dashboard listing for navigation.
+  const { data: ownImages } = await supabase
+    .from("images")
+    .select("id, original_filename, annotations(count)")
+    .eq("owner_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  const siblings: ImageNavRow[] = (ownImages ?? []).map((row) => {
+    const counts = row.annotations as { count: number }[] | null;
+    return {
+      id: row.id as string,
+      original_filename: row.original_filename as string | null,
+      annotation_count: counts?.[0]?.count ?? 0,
+    };
+  });
+
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
@@ -77,6 +98,15 @@ export default async function AnnotatePage({
         </div>
         <MaskDownloadButton imageId={image.id} />
       </div>
+
+      <AnnotationImageNav
+        current={{
+          id: image.id,
+          original_filename: image.original_filename ?? null,
+          annotation_count: annotations?.length ?? 0,
+        }}
+        siblings={siblings}
+      />
 
       {signed?.signedUrl ? (
         <AnnotationEditor

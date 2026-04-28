@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import type { LiteratureRangeRow } from "@/lib/supabase/types";
 import { useEffect, useMemo, useState } from "react";
 
@@ -36,7 +37,7 @@ export function LiteratureTable() {
           setError("文献範囲カタログの取得に失敗しました。");
         }
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e) => setError(errorMessage(e)));
   }, []);
 
   const filtered = useMemo(() => {

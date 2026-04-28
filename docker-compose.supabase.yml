@@ -136,7 +136,7 @@ services:
 
   # ---------- Studio (admin UI) ------------------------------------------
   supabase-studio:
-    image: supabase/studio:20241106-3c29c09
+    image: supabase/studio:2026.04.20-sha-b721a2d
     container_name: supabase-studio
     restart: unless-stopped
     depends_on:
@@ -156,6 +156,7 @@ services:
       AUTH_JWT_SECRET: ${JWT_SECRET}
       DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+      HOSTNAME: 0.0.0.0
     ports:
       - "3001:3000"
     networks:

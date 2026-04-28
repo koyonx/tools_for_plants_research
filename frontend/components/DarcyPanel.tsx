@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, DarcyResult } from "@/lib/supabase/types";
 import { useRouter } from "next/navigation";
@@ -165,7 +166,7 @@ export function DarcyPanel({
       });
       pollRefFn.current?.(body.analysis_id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setTriggering(false);
     }
@@ -224,7 +225,7 @@ export function DarcyPanel({
 
       {result && (
         <div className="space-y-4">
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr_auto_1fr] lg:grid-cols-[auto_1fr_auto_1fr_auto_1fr]">
             <dt className="text-neutral-500">K_leaf [kg/(s·Pa·m)]</dt>
             <dd className="font-mono">{fmtSci(result.k_leaf)}</dd>
             <dt className="text-neutral-500">平均流速 [m/s]</dt>

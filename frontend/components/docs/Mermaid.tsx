@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { useEffect, useId, useRef, useState } from "react";
 
 type Props = {
@@ -53,7 +54,7 @@ export function Mermaid({ code }: Props) {
         if (!cancelled) setSvg(rendered);
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : String(e));
+          setError(errorMessage(e));
           setSvg(null);
         }
       }

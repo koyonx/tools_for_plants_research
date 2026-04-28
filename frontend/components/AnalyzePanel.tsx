@@ -1,5 +1,7 @@
 "use client";
 
+import { Stat } from "@/components/Stat";
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, BasicMeasurementResult } from "@/lib/supabase/types";
 import { useRouter } from "next/navigation";
@@ -56,7 +58,7 @@ export function AnalyzePanel({ imageId, initial, canRun }: Props) {
       // refreshKey bumps and re-validates against the new result.
       if (body.status === "done") router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setRunning(false);
     }
@@ -141,21 +143,25 @@ export function AnalyzePanel({ imageId, initial, canRun }: Props) {
 
       {result && (
         <div className="space-y-4">
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
-            <dt className="text-neutral-500">µm/px</dt>
-            <dd className="font-mono">{result.scale.um_per_px.toFixed(4)}</dd>
-            <dt className="text-neutral-500">葉面積</dt>
-            <dd className="font-mono">{result.measurement.leaf_area_um2.toFixed(0)} µm²</dd>
-            <dt className="text-neutral-500">平均厚み</dt>
-            <dd className="font-mono">{result.measurement.leaf_mean_thickness_um.toFixed(1)} µm</dd>
-            <dt className="text-neutral-500">中央厚み</dt>
-            <dd className="font-mono">
-              {result.measurement.leaf_median_thickness_um.toFixed(1)} µm
-            </dd>
-            <dt className="text-neutral-500">最小厚み</dt>
-            <dd className="font-mono">{result.measurement.leaf_min_thickness_um.toFixed(1)} µm</dd>
-            <dt className="text-neutral-500">最大厚み</dt>
-            <dd className="font-mono">{result.measurement.leaf_max_thickness_um.toFixed(1)} µm</dd>
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            <Stat label="µm/px" value={result.scale.um_per_px.toFixed(4)} />
+            <Stat label="葉面積" value={`${result.measurement.leaf_area_um2.toFixed(0)} µm²`} />
+            <Stat
+              label="平均厚み"
+              value={`${result.measurement.leaf_mean_thickness_um.toFixed(1)} µm`}
+            />
+            <Stat
+              label="中央厚み"
+              value={`${result.measurement.leaf_median_thickness_um.toFixed(1)} µm`}
+            />
+            <Stat
+              label="最小厚み"
+              value={`${result.measurement.leaf_min_thickness_um.toFixed(1)} µm`}
+            />
+            <Stat
+              label="最大厚み"
+              value={`${result.measurement.leaf_max_thickness_um.toFixed(1)} µm`}
+            />
           </dl>
           <ThicknessChart
             x={result.measurement.thickness_profile_x_um}
