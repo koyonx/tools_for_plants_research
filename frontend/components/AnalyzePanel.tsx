@@ -1,12 +1,12 @@
 "use client";
 
+import { Stat } from "@/components/Stat";
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, BasicMeasurementResult } from "@/lib/supabase/types";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ThicknessChart } from "./ThicknessChart";
-import { errorMessage } from "@/lib/error-message";
-import { Stat } from "@/components/Stat";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
 

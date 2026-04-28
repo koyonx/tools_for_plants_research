@@ -1,12 +1,12 @@
 "use client";
 
+import { SampleAsAnnotations } from "@/components/SampleAsAnnotations";
+import { Stat } from "@/components/Stat";
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, CellposeResult } from "@/lib/supabase/types";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { errorMessage } from "@/lib/error-message";
-import { Stat } from "@/components/Stat";
-import { SampleAsAnnotations } from "@/components/SampleAsAnnotations";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
 const POLL_INTERVAL_MS = 2500;

@@ -1,8 +1,8 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type {
-import { errorMessage } from "@/lib/error-message";
   CompareMetricDef,
   CompareMetricResult,
   CompareResponse,

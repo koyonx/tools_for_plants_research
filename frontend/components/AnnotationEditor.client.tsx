@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { AnnotationRow } from "@/lib/supabase/types";
 import { TISSUE_CLASSES, TISSUE_CLASS_BY_KEY, type TissueClassKey } from "@/lib/tissue-classes";
@@ -7,7 +8,6 @@ import type Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Circle, Image as KonvaImage, Layer, Line, Stage } from "react-konva";
-import { errorMessage } from "@/lib/error-message";
 
 export type AnnotationEditorProps = {
   imageId: string;
@@ -302,11 +302,12 @@ export function AnnotationEditorInner({
     }
   }, [editingId, editingPolygon, editingClass, supabase]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deleteAnnotation closes over only supabase + setState; first-render reference is safe and capturing it as a dep would break memoisation.
   const deleteEditingAnnotation = useCallback(async () => {
     if (!editingId) return;
     if (!window.confirm("このアノテーションを削除しますか？")) return;
     await deleteAnnotation(editingId);
-  }, [editingId]); // deleteAnnotation closes over editingId itself
+  }, [editingId]);
 
   // Keyboard shortcuts scoped to the editor container (tabIndex={0}).
   // Attaching via React's onKeyDown / onKeyUp on the container avoids
@@ -314,7 +315,12 @@ export function AnnotationEditorInner({
   // scrolling the viewport) the way a global `window` listener would.
   const onContainerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement | null;
-    if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT") return;
+    if (
+      target?.tagName === "INPUT" ||
+      target?.tagName === "TEXTAREA" ||
+      target?.tagName === "SELECT"
+    )
+      return;
     if (e.code === "Space") {
       e.preventDefault();
       setPanMode(true);
@@ -482,10 +488,13 @@ export function AnnotationEditorInner({
                       />
                     );
                   })}
-                  {/* Vertex handles: drag to move, Shift-click to delete. */}
+                  {/* Vertex handles: drag to move, Shift-click to delete.
+                      Coordinate-based key would re-mount the handle on
+                      every drag tick (which would kill the active drag);
+                      the slot index is the natural identity here. */}
                   {editingPolygon.map((p, i) => (
                     <Circle
-                      key={`h${i}`}
+                      key={`vh-${i}-${editingId}`}
                       x={p[0]}
                       y={p[1]}
                       radius={VERTEX_RADIUS_PX_VIEW * 1.2}

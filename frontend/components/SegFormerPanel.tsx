@@ -1,11 +1,11 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, SegFormerResult } from "@/lib/supabase/types";
 import { TISSUE_CLASS_BY_KEY } from "@/lib/tissue-classes";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { errorMessage } from "@/lib/error-message";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
 const POLL_INTERVAL_MS = 2500;

@@ -1,7 +1,7 @@
 "use client";
 
-import { createClient } from "@/lib/supabase/client";
 import { errorMessage } from "@/lib/error-message";
+import { createClient } from "@/lib/supabase/client";
 import { TISSUE_CLASSES, type TissueClassKey } from "@/lib/tissue-classes";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -91,7 +91,9 @@ export function SampleAsAnnotations({
           }}
           disabled={valid.length === 0}
           className="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-900"
-          title={valid.length === 0 ? "保存できるポリゴンがありません" : "結果をアノテーションとして保存"}
+          title={
+            valid.length === 0 ? "保存できるポリゴンがありません" : "結果をアノテーションとして保存"
+          }
         >
           {label}
           {countHint ? ` (${countHint})` : ""}

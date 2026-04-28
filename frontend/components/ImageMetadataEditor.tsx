@@ -1,9 +1,9 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { ImageRow, PhotosynthesisType } from "@/lib/supabase/types";
 import { useState } from "react";
-import { errorMessage } from "@/lib/error-message";
 
 type Props = {
   image: ImageRow;

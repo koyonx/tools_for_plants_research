@@ -68,9 +68,7 @@ export function AnnotationImageNav({ current, siblings }: Props) {
                 }`}
                 title={`${s.annotation_count} アノテーション`}
               >
-                <span className="truncate">
-                  {s.original_filename ?? s.id.slice(0, 8)}
-                </span>
+                <span className="truncate">{s.original_filename ?? s.id.slice(0, 8)}</span>
                 {s.annotation_count > 0 && (
                   <span className="ml-1 text-neutral-500">({s.annotation_count})</span>
                 )}

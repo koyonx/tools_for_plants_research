@@ -1,10 +1,10 @@
 "use client";
 
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { Visibility } from "@/lib/supabase/types";
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
-import { errorMessage } from "@/lib/error-message";
 
 type ImageMeta = { width: number; height: number };
 
@@ -114,9 +114,7 @@ export function Uploader({ afterUpload = "detail" }: UploaderProps = {}) {
       // instead of dropping the user on a "サイズ未取得" error screen.
       const goToAnnotate = afterUpload === "annotate" && meta != null;
       router.push(
-        goToAnnotate
-          ? `/dashboard/images/${imageId}/annotate`
-          : `/dashboard/images/${imageId}`,
+        goToAnnotate ? `/dashboard/images/${imageId}/annotate` : `/dashboard/images/${imageId}`,
       );
     } catch (e) {
       setError(errorMessage(e));

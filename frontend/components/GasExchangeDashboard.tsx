@@ -1,9 +1,9 @@
 "use client";
 
 import { GmFitPanel } from "@/components/GmFitPanel";
+import { errorMessage } from "@/lib/error-message";
 import { createClient } from "@/lib/supabase/client";
 import type {
-import { errorMessage } from "@/lib/error-message";
   GasExchangePointRow,
   GasExchangeSessionRow,
   ImageRow,
