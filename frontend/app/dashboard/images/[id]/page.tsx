@@ -209,6 +209,7 @@ export default async function ImageDetailPage({
           initial={latestCellpose ?? null}
           umPerPx={umPerPx}
           canRun={isOwner}
+          currentUserId={user?.id ?? null}
         />
       )}
       {signed?.signedUrl && (
