@@ -58,11 +58,13 @@ def detect_scale_bar(
         raise ValueError("scale-bar ROI is empty; check roi_fraction")
 
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    # dark-on-light → invert so the bar comes out as a white blob
+    # dark-on-light → invert so the bar comes out as a white blob.  We do
+    # NOT apply a horizontal MORPH_CLOSE: when the bar is rendered inside
+    # a labelled box (e.g. "100 µm" caption with a surrounding rectangle),
+    # closing fuses the bar into the box outline and the result has aspect
+    # ≈ 4, which fails the bar-shape check below.  Otsu alone gives us the
+    # bar as a separate, much thinner component.
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
-    # horizontal close bridges any anti-aliasing gap inside the bar
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 1))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
 
     num, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
     best_width = 0
@@ -72,8 +74,10 @@ def detect_scale_bar(
         if bh == 0:
             continue
         aspect = bw / bh
-        # a scale bar is wide, thin, and carries a minimum of ink
-        if bw > best_width and aspect >= 5 and area >= 20 and bw >= 10:
+        # a scale bar is wide, thin, and carries a minimum of ink.  Aspect
+        # ≥ 8 reliably separates a true bar from the surrounding caption
+        # box (≈ 4) and from glyph strokes (typically ≤ 2).
+        if bw > best_width and aspect >= 8 and area >= 20 and bw >= 10:
             best_width = int(bw)
             best = (int(x0 + x), int(y0 + y), int(bw), int(bh))
 
