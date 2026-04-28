@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, Co2MorphometricsResult } from "@/lib/supabase/types";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { errorMessage } from "@/lib/error-message";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
 const POLL_INTERVAL_MS = 2500;
@@ -179,7 +180,7 @@ export function Co2MorphometricsPanel({
       });
       pollRefFn.current?.(body.analysis_id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setTriggering(false);
     }
@@ -236,7 +237,7 @@ export function Co2MorphometricsPanel({
 
       {result && (
         <div className="space-y-4">
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr_auto_1fr] lg:grid-cols-[auto_1fr_auto_1fr_auto_1fr]">
             <dt className="text-neutral-500">S_mes/S</dt>
             <dd className="font-mono">{fmt(result.s_mes_s)}</dd>
             <dt className="text-neutral-500">S_c/S</dt>

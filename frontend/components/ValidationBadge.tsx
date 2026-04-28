@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import type { ValidationReport } from "@/lib/supabase/types";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { errorMessage } from "@/lib/error-message";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
 
@@ -56,7 +57,7 @@ export function ValidationBadge({ target, refreshKey }: Props) {
       const body = (await resp.json()) as { report: ValidationReport };
       setReport(body.report);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }

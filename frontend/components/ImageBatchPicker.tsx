@@ -5,6 +5,7 @@ import type { ImageRow, PhotosynthesisType } from "@/lib/supabase/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { errorMessage } from "@/lib/error-message";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
 
@@ -147,7 +148,7 @@ export function ImageBatchPicker({ initial, currentUserId }: Props) {
       const body = (await resp.json()) as { id: string };
       router.push(`/dashboard/batches/${body.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
       setKickoffBusy(false);
     }
   };

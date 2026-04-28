@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import type {
+import { errorMessage } from "@/lib/error-message";
   CompareMetricDef,
   CompareMetricResult,
   CompareResponse,
@@ -127,7 +128,7 @@ export function CompareDashboard({ images }: { images: MinImage[] }) {
       const body = (await resp.json()) as CompareResponse;
       setResponse(body);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -168,7 +169,7 @@ export function CompareDashboard({ images }: { images: MinImage[] }) {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   };
 

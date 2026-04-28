@@ -3,6 +3,7 @@
 import { GmFitPanel } from "@/components/GmFitPanel";
 import { createClient } from "@/lib/supabase/client";
 import type {
+import { errorMessage } from "@/lib/error-message";
   GasExchangePointRow,
   GasExchangeSessionRow,
   ImageRow,
@@ -97,7 +98,7 @@ export function GasExchangeDashboard({ initialSessions, images }: Props) {
         const body = (await resp.json()) as { points: GasExchangePointRow[] };
         if (!cancelled) setSelectedPoints(body.points);
       } catch (e) {
-        if (!cancelled) setDetailError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setDetailError(errorMessage(e));
       } finally {
         if (!cancelled) setDetailBusy(false);
       }
@@ -140,7 +141,7 @@ export function GasExchangeDashboard({ initialSessions, images }: Props) {
       setSessions((prev) => [body.session, ...prev]);
       setUploadSummary(`取り込み成功: ${body.point_count} 点 (${body.session.instrument})`);
     } catch (e) {
-      setUploadError(e instanceof Error ? e.message : String(e));
+      setUploadError(errorMessage(e));
     } finally {
       setUploadBusy(false);
       // Allow re-upload of the same file
@@ -166,7 +167,7 @@ export function GasExchangeDashboard({ initialSessions, images }: Props) {
       setSessions((prev) => prev.filter((s) => s.id !== session.id));
       if (selectedSession?.id === session.id) setSelectedSession(null);
     } catch (e) {
-      alert(`削除失敗: ${e instanceof Error ? e.message : String(e)}`);
+      alert(`削除失敗: ${errorMessage(e)}`);
     }
   };
 

@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { AnalysisRow, WaterPathResult } from "@/lib/supabase/types";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { errorMessage } from "@/lib/error-message";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
 const POLL_INTERVAL_MS = 2500;
@@ -160,7 +161,7 @@ export function WaterPathPanel({
       });
       pollRefFn.current?.(body.analysis_id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setTriggering(false);
     }
@@ -213,7 +214,7 @@ export function WaterPathPanel({
 
       {result && (
         <div className="space-y-3">
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr_auto_1fr] lg:grid-cols-[auto_1fr_auto_1fr_auto_1fr]">
             <dt className="text-neutral-500">ソース</dt>
             <dd className="font-mono">
               {result.source_class === "xylem_vessel" ? "導管" : "木部 (代用)"}

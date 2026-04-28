@@ -2,6 +2,7 @@
 
 import type { LiteratureRangeRow } from "@/lib/supabase/types";
 import { useEffect, useMemo, useState } from "react";
+import { errorMessage } from "@/lib/error-message";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001";
 
@@ -36,7 +37,7 @@ export function LiteratureTable() {
           setError("文献範囲カタログの取得に失敗しました。");
         }
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e) => setError(errorMessage(e)));
   }, []);
 
   const filtered = useMemo(() => {
