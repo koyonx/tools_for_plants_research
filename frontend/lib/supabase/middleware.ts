@@ -1,5 +1,6 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import { SUPABASE_STORAGE_KEY } from "./storage-key";
 
 const serverSupabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
@@ -12,6 +13,7 @@ export async function updateSession(request: NextRequest) {
     serverSupabaseUrl,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      auth: { storageKey: SUPABASE_STORAGE_KEY },
       cookies: {
         getAll() {
           return request.cookies.getAll();

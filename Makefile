@@ -39,6 +39,10 @@ gen-jwt: ## Print Supabase anon/service JWTs for the JWT_SECRET in .env
 setup-local: ## One-shot: write .env with auto-generated secrets so `make up` just works
 	@bash ./scripts/setup-local.sh
 
+.PHONY: login
+login: ## Print a working magic-link URL.  Usage: make login EMAIL=you@example.com [NEXT=/dashboard]
+	@if [ -z "$(EMAIL)" ]; then echo "usage: make login EMAIL=you@example.com [NEXT=/dashboard]" >&2; exit 1; fi
+	@./scripts/magic-link.sh "$(EMAIL)" "$(or $(NEXT),/dashboard)"
 
 # ----------------------------------------------------------------------------
 # Stack lifecycle
