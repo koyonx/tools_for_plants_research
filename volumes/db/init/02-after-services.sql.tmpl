@@ -33,6 +33,24 @@ CREATE TRIGGER on_auth_user_created
 -- ===========================================================================
 -- Storage bucket `images` + per-object RLS mirroring public.images visibility
 -- ===========================================================================
+
+-- storage-api connects as supabase_storage_admin and impersonates the JWT's
+-- role via `set_config('role', 'authenticated', true)`, which requires
+-- membership in that role.  It also runs subsequent SELECT/INSERT against
+-- storage.{buckets,objects} as the impersonated role, which therefore needs
+-- table privileges in the storage schema.  Same idea applies to GoTrue.
+GRANT anon, authenticated, service_role TO supabase_storage_admin;
+GRANT anon, authenticated, service_role TO supabase_auth_admin;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA storage TO anon, authenticated, service_role;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA storage TO anon, authenticated, service_role;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA storage TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_storage_admin IN SCHEMA storage
+  GRANT ALL ON TABLES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_storage_admin IN SCHEMA storage
+  GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_storage_admin IN SCHEMA storage
+  GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
+
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('images', 'images', false)
 ON CONFLICT (id) DO NOTHING;
@@ -500,3 +518,9 @@ CREATE POLICY "gm_fits owner write"
   TO authenticated
   USING (owner_id = auth.uid())
   WITH CHECK (owner_id = auth.uid());
+
+-- Tell PostgREST to reload its schema cache after every bootstrap run, so
+-- newly added columns/policies are visible to clients immediately.  Without
+-- this, PATCH/INSERT against new columns errors out with PGRST204 until
+-- the gateway is bounced.
+NOTIFY pgrst, 'reload schema';

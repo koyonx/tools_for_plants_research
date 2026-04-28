@@ -35,6 +35,11 @@ init-env: ## Create .env from .env.example if it doesn't exist
 gen-jwt: ## Print Supabase anon/service JWTs for the JWT_SECRET in .env
 	@./scripts/generate-jwt.sh "$$(grep ^JWT_SECRET $(ENV_FILE) | cut -d= -f2-)"
 
+.PHONY: setup-local
+setup-local: ## One-shot: write .env with auto-generated secrets so `make up` just works
+	@bash ./scripts/setup-local.sh
+
+
 # ----------------------------------------------------------------------------
 # Stack lifecycle
 # ----------------------------------------------------------------------------
