@@ -70,6 +70,10 @@ services:
       - ./frontend/components:/app/components
       - ./frontend/lib:/app/lib
       - ./frontend/public:/app/public
+      # Markdown source for the in-app docs.  Read at request time via
+      # fs.readFile(process.cwd() + "/content/..."), so without this
+      # mount edits don't show up until the image is rebuilt.
+      - ./frontend/content:/app/content
     ports:
       - "3000:3000"
     networks:
