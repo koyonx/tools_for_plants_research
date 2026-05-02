@@ -124,7 +124,48 @@ type HastNode = {
   tagName?: string;
   properties?: Record<string, unknown>;
   children?: HastNode[];
+  value?: string;
 };
+
+// A markdown paragraph that contains only an image (the `![alt](src)`
+// idiom on its own line) is parsed as `<p><img></p>`.  Our `img`
+// component override below renders a `<figure>`, which is block-level
+// and therefore an invalid descendant of `<p>` — React surfaces it as
+// a hydration error.  Lift those images out of their wrapping `<p>`
+// before sanitize/render so the figure ends up at block level.
+function unwrapImageParagraphs() {
+  const isOnlyImage = (p: HastNode): boolean => {
+    if (!Array.isArray(p.children)) return false;
+    let imgSeen = false;
+    for (const c of p.children) {
+      if (c.type === "text") {
+        if (typeof c.value === "string" && c.value.trim() !== "") return false;
+      } else if (c.type === "element" && c.tagName === "img") {
+        imgSeen = true;
+      } else {
+        return false;
+      }
+    }
+    return imgSeen;
+  };
+  const walk = (node: HastNode | null | undefined): void => {
+    if (!node || !Array.isArray(node.children)) return;
+    const out: HastNode[] = [];
+    for (const child of node.children) {
+      if (child.type === "element" && child.tagName === "p" && isOnlyImage(child)) {
+        for (const inner of child.children ?? []) {
+          if (inner.type === "element" && inner.tagName === "img") out.push(inner);
+        }
+      } else {
+        out.push(child);
+        walk(child);
+      }
+    }
+    node.children = out;
+  };
+  return (tree: HastNode) => walk(tree);
+}
+
 function mirrorFootnoteHrefPrefix() {
   const walk = (node: HastNode | null | undefined): void => {
     if (!node) return;
@@ -382,6 +423,9 @@ export function MarkdownDoc({ source }: Props) {
           //     rendered SVG/HTML output
           //   slug + autolink — anchor each heading
           rehypeRaw,
+          // Run BEFORE sanitize so any structural rewrite still gets
+          // sanitised; safe either way since we only move <img> nodes.
+          unwrapImageParagraphs,
           [rehypeSanitize, sanitizeSchema],
           mirrorFootnoteHrefPrefix,
           rehypeKatex,

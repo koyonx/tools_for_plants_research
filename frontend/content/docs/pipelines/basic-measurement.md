@@ -58,9 +58,9 @@ $$
 葉厚分布の代表値は列ごとの $t(x)$ から取ります:
 
 $$
-\bar t = \frac{1}{n_x}\sum_x t(x),\quad
+\bar{t} = \frac{1}{n_x}\sum_x t(x),\quad
 t_{0.5} = \operatorname{median}\{t(x)\},\quad
-t_\max = \max_x t(x).
+t_{\max} = \max_x t(x).
 $$
 
 ## 入出力スキーマ
